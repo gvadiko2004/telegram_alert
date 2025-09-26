@@ -79,26 +79,43 @@ async def send_alert(message: str):
 
 # ---------------- Функция ставок ----------------
 async def make_bid(url):
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import TimeoutException, NoSuchElementException
+
     chrome_options = Options()
+    chrome_options.add_argument("--headless=new")  # headless режим
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument(f"--user-data-dir={PROFILE_PATH}")
-    chrome_options.add_argument("--start-minimized")
-    chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--start-maximized")
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     wait = WebDriverWait(driver, 30)
 
     try:
-        login_if_needed(driver)
+        # Загружаем страницу логина и добавляем куки, если есть
+        driver.get("https://freelancehunt.com")
+        if os.path.exists(COOKIES_FILE):
+            import pickle
+            with open(COOKIES_FILE, "rb") as f:
+                cookies = pickle.load(f)
+            for cookie in cookies:
+                driver.add_cookie(cookie)
+            print("[INFO] Cookies загружены.")
+
         driver.get(url)
         wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
         print(f"[INFO] Страница проекта загружена: {url}")
 
-        wait_short = WebDriverWait(driver, 5)
+        # Нажимаем кнопку "Сделать ставку"
         try:
-            bid_btn = wait_short.until(EC.element_to_be_clickable((By.ID, "add-bid")))
+            bid_btn = wait.until(EC.element_to_be_clickable((By.ID, "add-bid")))
             driver.execute_script("arguments[0].click();", bid_btn)
             print("[INFO] Нажата кнопка 'Сделать ставку'")
         except TimeoutException:
@@ -112,27 +129,23 @@ async def make_bid(url):
                 await send_alert(f"⚠️ Не удалось найти кнопку 'Сделать ставку' для проекта: {url}")
                 return
 
-        time.sleep(1)
+        # Вводим цену и комментарий
+        price = "1111"
         try:
             price_span = wait.until(EC.presence_of_element_located((
                 By.CSS_SELECTOR, "span.text-green.bold.pull-right.price.with-tooltip.hidden-xs"
             )))
-            price = re.sub(r"[^\d]", "", price_span.text) or "1111"
+            price = re.sub(r"[^\d]", "", price_span.text) or price
         except Exception:
-            price = "1111"
+            pass
 
         driver.find_element(By.ID, "amount-0").send_keys(price)
         driver.find_element(By.ID, "days_to_deliver-0").send_keys("3")
         driver.execute_script(f"document.getElementById('comment-0').value = `{COMMENT_TEXT}`;")
-        js_click_code = """
+        driver.execute_script("""
         const addButton = document.querySelector('#add-0');
-        if (addButton) {
-            const rect = addButton.getBoundingClientRect();
-            const evt = new MouseEvent('click',{bubbles:true, clientX:rect.left+rect.width/2, clientY:rect.top+rect.height/2});
-            addButton.dispatchEvent(evt);
-        }
-        """
-        driver.execute_script(js_click_code)
+        if (addButton) addButton.click();
+        """)
         print("[SUCCESS] Ставка отправлена через JS")
         await send_alert(f"✅ Ставка успешно отправлена!\nСсылка: {url}\nСумма: {price}")
 
@@ -140,7 +153,10 @@ async def make_bid(url):
         print(f"[ERROR] Ошибка при отправке заявки: {e}")
         await send_alert(f"❌ Ошибка при отправке ставки: {e}\nСсылка: {url}")
 
-    print("[INFO] Браузер оставлен открытым для проверки.")
+    finally:
+        driver.quit()  # закрываем браузер после работы
+        print("[INFO] Браузер закрыт.")
+
 
 # ---------------- Телеграм ----------------
 client = TelegramClient("session", api_id, api_hash)
