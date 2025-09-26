@@ -31,7 +31,8 @@ chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
 chrome_options.add_argument("--headless")  # 👉 если нужно без интерфейса
 
-driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=chrome_options)
+driver = webdriver.Chrome(service=Service("/usr/local/bin/chromedriver"), options=chrome_options)
+
 
 
 # ==============================
