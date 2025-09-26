@@ -16,7 +16,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
 
-# ===== Telegram =====
+# ===== Настройки Telegram =====
 api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
@@ -40,10 +40,9 @@ COMMENT_TEXT = """Доброго дня! Готовий виконати роб�
 Заздалегідь дякую!
 """
 
-COOKIES_FILE = "/root/chrome_profile/fh_cookies.pkl"
+COOKIES_FILE = "fh_cookies.pkl"
 LOGIN_URL = "https://freelancehunt.com/profile/login"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
-PROFILE_PATH = "/root/chrome_profile"
 
 # ===== Функции =====
 def extract_links(text: str):
@@ -51,10 +50,9 @@ def extract_links(text: str):
             if link.startswith("https://freelancehunt.com/")]
 
 def save_cookies(driver):
-    os.makedirs(PROFILE_PATH, exist_ok=True)
     with open(COOKIES_FILE, "wb") as f:
         pickle.dump(driver.get_cookies(), f)
-    print("[INFO] Cookies сохранены.")
+    print("[STEP] Cookies сохранены.")
 
 def load_cookies(driver):
     if os.path.exists(COOKIES_FILE):
@@ -62,59 +60,56 @@ def load_cookies(driver):
             cookies = pickle.load(f)
         for cookie in cookies:
             driver.add_cookie(cookie)
-        print("[INFO] Cookies загружены.")
+        print("[STEP] Cookies загружены.")
         return True
     return False
 
 def create_driver():
-    print("[STEP] Запуск виртуального Chrome...")
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument(f"--user-data-dir={PROFILE_PATH}")
+    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_profile_{int(time.time())}")
+    print("[STEP] Запуск виртуального Chrome...")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     print("[STEP] Chrome запущен.")
     return driver
 
 def login(driver):
-    print(f"[STEP] Переход на страницу логина: {LOGIN_URL}")
-    driver.get(LOGIN_URL)
-    wait = WebDriverWait(driver, 20)
-    
     try:
-        # Ищем label с текстом "Логин" и берём соседний input
-        login_label = driver.find_element(By.XPATH, "//label[contains(text(), 'Логин')]")
-        login_input = login_label.find_element(By.XPATH, "./following-sibling::div//input")
+        print(f"[STEP] Переход на страницу логина: {LOGIN_URL}")
+        driver.get(LOGIN_URL)
+        wait = WebDriverWait(driver, 20)
+
+        login_input = wait.until(EC.presence_of_element_located((By.ID, "login-0")))
         login_input.send_keys(LOGIN_DATA["login"])
         print("[STEP] Ввели логин.")
 
-        # Ищем label с текстом "Пароль" и берём соседний input
-        password_label = driver.find_element(By.XPATH, "//label[contains(text(), 'Пароль')]")
-        password_input = password_label.find_element(By.XPATH, "./following-sibling::div//input")
+        password_input = driver.find_element(By.ID, "password-0")
         password_input.send_keys(LOGIN_DATA["password"])
         print("[STEP] Ввели пароль.")
 
-        # Кнопка "Увійти"
-        submit_btn = driver.find_element(By.XPATH, "//button[contains(text(),'Увійти')]")
+        submit_btn = driver.find_element(By.ID, "save-0")
         submit_btn.click()
         print("[STEP] Нажата кнопка 'Увійти'")
-
         time.sleep(5)
+
         save_cookies(driver)
-        print("[INFO] Авторизация пройдена и куки сохранены.")
+        print("[INFO] Авторизация успешна.")
+        return True
     except TimeoutException:
-        print("[ERROR] Не удалось найти поля логина/пароля — возможно капча.")
-        raise Exception("Авторизация не удалась")
+        print("[ERROR] Поля логина/пароля не найдены — возможно капча.")
+        return False
     except Exception as e:
         print(f"[ERROR] Ошибка при авторизации: {e}")
-        raise e
+        return False
 
 async def send_alert(message: str):
     try:
-        alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=message)
+        await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=message)
+        print(f"[STEP] Отправлено уведомление в Telegram: {message[:50]}...")
     except Exception as e:
         print(f"[ERROR] Не удалось отправить уведомление: {e}")
 
@@ -126,10 +121,12 @@ async def make_bid(url):
         driver.get(url)
         time.sleep(3)
 
-        # Загружаем куки если есть
         if not load_cookies(driver):
-            print("[STEP] Cookies нет, нужна авторизация.")
-            login(driver)
+            print("[INFO] Cookies нет, нужна авторизация.")
+            if not login(driver):
+                await send_alert(f"❌ Авторизация не удалась на {url}")
+                driver.quit()
+                return
             driver.get(url)
             time.sleep(3)
 
@@ -138,12 +135,12 @@ async def make_bid(url):
             driver.find_element(By.CSS_SELECTOR, "a[href='/profile']")
             print("[INFO] Уже авторизован.")
         except NoSuchElementException:
-            print("[INFO] Авторизация не прошла.")
+            print("[WARNING] Авторизация не прошла после загрузки куки.")
             await send_alert(f"❌ Авторизация не прошла на {url}")
             driver.quit()
             return
 
-        # Ищем кнопку "Сделать ставку"
+        # Кнопка "Сделать ставку"
         try:
             bid_btn = wait.until(EC.element_to_be_clickable((By.ID, "add-bid")))
             bid_btn.click()
@@ -154,7 +151,7 @@ async def make_bid(url):
             driver.quit()
             return
 
-        # Заполнение формы
+        # Заполняем форму
         try:
             driver.find_element(By.ID, "amount-0").send_keys("1111")
             driver.find_element(By.ID, "days_to_deliver-0").send_keys("3")
@@ -174,7 +171,7 @@ async def make_bid(url):
         driver.quit()
         print("[INFO] Браузер закрыт.")
 
-# ===== Telegram =====
+# ===== Телеграм =====
 client = TelegramClient("session", api_id, api_hash)
 
 @client.on(events.NewMessage)
@@ -189,6 +186,8 @@ async def handler(event):
 # ===== Запуск =====
 async def main():
     print("[INFO] Запуск бота уведомлений...")
+    await alert_bot.initialize()
+    print("[INFO] Бот уведомлений запущен.")
     await client.start()
     print("[INFO] Telegram бот запущен. Ожидаем новые проекты...")
     await client.run_until_disconnected()
