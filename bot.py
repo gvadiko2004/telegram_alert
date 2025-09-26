@@ -50,15 +50,16 @@ COMMENT_TEXT = (
     "Заздалегідь дякую!"
 )
 
-# ---------------- Init ----------------
+# ---------------- Telegram ----------------
 alert_bot = Bot(token=ALERT_BOT_TOKEN)
 tg_client = TelegramClient("session", API_ID, API_HASH)
 
 # ---------------- Helpers ----------------
-def ensure_dns(host="freelancehunt.com"):
+def ensure_dns(name="freelancehunt.com", timeout=5):
     try:
-        ip = socket.gethostbyname(host)
-        print(f"[NET] DNS ok: {host} -> {ip}")
+        socket.setdefaulttimeout(timeout)
+        ip = socket.gethostbyname(name)
+        print(f"[NET] DNS ok: {name} -> {ip}")
         return ip
     except Exception as e:
         print(f"[NET WARN] DNS resolve failed: {e}")
@@ -89,14 +90,10 @@ def create_chrome_driver():
         opts.add_argument(f"--host-resolver-rules=MAP freelancehunt.com {ip}")
 
     svc = Service(ChromeDriverManager().install())
-    try:
-        driver = webdriver.Chrome(service=svc, options=opts)
-        driver.set_page_load_timeout(60)
-        print(f"[STEP] Chrome ready. HEADLESS={HEADLESS}. Temp profile: {tmp_profile}")
-        return driver
-    except WebDriverException as e:
-        print("[ERROR] Chrome driver error:", e)
-        raise
+    driver = webdriver.Chrome(service=svc, options=opts)
+    driver.set_page_load_timeout(60)
+    print(f"[STEP] Chrome ready. HEADLESS={HEADLESS}. Temp profile: {tmp_profile}")
+    return driver
 
 driver = create_chrome_driver()
 
@@ -111,7 +108,7 @@ def save_cookies():
     try:
         with open(COOKIES_FILE, "wb") as f:
             pickle.dump(driver.get_cookies(), f)
-        print("[STEP] Cookies saved.")
+        print("[STEP] Cookies saved")
     except Exception as e:
         print("[ERROR] save_cookies:", e)
 
@@ -126,7 +123,7 @@ def load_cookies():
                 driver.add_cookie(c)
             except Exception:
                 pass
-        print("[STEP] Cookies loaded.")
+        print("[STEP] Cookies loaded")
         return True
     except Exception as e:
         print("[WARN] load_cookies:", e)
@@ -166,19 +163,20 @@ def login_if_needed():
         print("[LOGIN] login done")
         return True
     except NoSuchElementException:
-        print("[LOGIN] already logged in or fields not found")
+        print("[LOGIN] already logged in")
         return True
     except Exception as e:
         print("[LOGIN ERROR]", e)
         return False
 
-# ---------------- Telegram ----------------
+# ---------------- Telegram / Bidding ----------------
 def extract_links(text):
+    """Возвращает чистые ссылки без звездочек"""
     return [ln for ln in re.findall(r"https?://[^\s]+", text) if "freelancehunt.com" in ln]
 
 async def send_alert(msg):
     try:
-        # parse_mode=None чтобы не вставлялись **
+        # parse_mode=None убирает любые ** и форматирование
         await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=msg, parse_mode=None)
         print("[TG ALERT]", msg)
     except Exception as e:
