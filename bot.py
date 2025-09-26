@@ -21,7 +21,6 @@ api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
 ALERT_CHAT_ID = 1168962519
-
 alert_bot = Bot(token=ALERT_BOT_TOKEN)
 
 # ===== Настройки сайта =====
@@ -66,69 +65,61 @@ def load_cookies(driver):
 
 def create_driver():
     chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_profile_{int(time.time())}")
-    print("[STEP] Запуск виртуального Chrome...")
+    # Важно: НЕ headless, чтобы видеть все действия
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-    print("[STEP] Chrome запущен.")
+    print("[STEP] Chrome запущен (видимый режим).")
     return driver
 
 def check_captcha(driver):
-    """Проверка на капчу на странице"""
     try:
-        page_text = driver.page_source.lower()
-        if "captcha" in page_text or "пройдите капчу" in page_text:
-            print("[WARNING] Капча обнаружена на странице!")
+        text = driver.find_element(By.TAG_NAME, "body").text
+        if "капча" in text.lower() or "captcha" in text.lower():
+            print("[WARNING] На странице обнаружена капча!")
             return True
-        # Проверка iframe от Google reCAPTCHA
-        if driver.find_elements(By.CSS_SELECTOR, "iframe[src*='recaptcha']"):
-            print("[WARNING] reCAPTCHA iframe найден!")
-            return True
-    except Exception as e:
-        print(f"[ERROR] Ошибка при проверке капчи: {e}")
+    except Exception:
+        pass
     return False
 
 def login(driver):
+    driver.get(LOGIN_URL)
+    print(f"[STEP] Перешли на страницу логина: {LOGIN_URL}")
+    wait = WebDriverWait(driver, 20)
     try:
-        print(f"[STEP] Переход на страницу логина: {LOGIN_URL}")
-        driver.get(LOGIN_URL)
-        wait = WebDriverWait(driver, 20)
+        # Ищем поля относительно текста Логин и Пароль
+        login_input = driver.find_element(By.XPATH, "//label[contains(text(),'Логин')]/following-sibling::div//input")
+        password_input = driver.find_element(By.XPATH, "//label[contains(text(),'Пароль')]/following-sibling::div//input")
+        login_button = driver.find_element(By.ID, "save-0")
+        print("[STEP] Найдены поля Логин, Пароль и кнопка Войти.")
 
-        login_input = wait.until(EC.presence_of_element_located((By.ID, "login-0")))
+        login_input.clear()
         login_input.send_keys(LOGIN_DATA["login"])
-        print("[STEP] Ввели логин.")
+        print(f"[STEP] Ввели логин: {LOGIN_DATA['login']}")
 
-        password_input = driver.find_element(By.ID, "password-0")
+        password_input.clear()
         password_input.send_keys(LOGIN_DATA["password"])
-        print("[STEP] Ввели пароль.")
+        print(f"[STEP] Ввели пароль.")
 
-        submit_btn = driver.find_element(By.ID, "save-0")
-        submit_btn.click()
-        print("[STEP] Нажата кнопка 'Увійти'")
+        login_button.click()
+        print("[STEP] Нажата кнопка Войти.")
         time.sleep(5)
 
         if check_captcha(driver):
-            print("[ERROR] Капча после логина — авторизация невозможна.")
-            return False
+            raise Exception("Капча обнаружена после попытки логина.")
 
         save_cookies(driver)
-        print("[INFO] Авторизация успешна.")
-        return True
-    except TimeoutException:
-        print("[ERROR] Поля логина/пароля не найдены — возможно капча.")
-        return False
-    except Exception as e:
-        print(f"[ERROR] Ошибка при авторизации: {e}")
-        return False
+        print("[STEP] Авторизация пройдена и куки сохранены.")
+
+    except NoSuchElementException:
+        raise Exception("Поля логина/пароля или кнопка не найдены — возможно капча.")
 
 async def send_alert(message: str):
     try:
         await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=message)
-        print(f"[STEP] Отправлено уведомление в Telegram: {message[:50]}...")
+        print(f"[STEP] Отправлено уведомление в Telegram: {message}")
     except Exception as e:
         print(f"[ERROR] Не удалось отправить уведомление: {e}")
 
@@ -136,68 +127,60 @@ async def make_bid(url):
     driver = create_driver()
     wait = WebDriverWait(driver, 20)
     try:
-        print(f"[STEP] Переход на страницу проекта: {url}")
         driver.get(url)
+        print(f"[STEP] Перешли на страницу проекта: {url}")
         time.sleep(3)
 
-        if check_captcha(driver):
-            await send_alert(f"⚠️ Капча обнаружена на странице проекта: {url}")
-            driver.quit()
-            return
-
         if not load_cookies(driver):
-            print("[INFO] Cookies нет, нужна авторизация.")
-            if not login(driver):
-                await send_alert(f"❌ Авторизация не удалась на {url}")
-                driver.quit()
-                return
+            print("[STEP] Cookies нет, нужна авторизация.")
+            login(driver)
             driver.get(url)
+            print(f"[STEP] Вернулись на страницу проекта после логина: {url}")
             time.sleep(3)
 
-        if check_captcha(driver):
-            await send_alert(f"⚠️ Капча после авторизации на проекте: {url}")
-            driver.quit()
-            return
-
+        # Проверка авторизации
         try:
             driver.find_element(By.CSS_SELECTOR, "a[href='/profile']")
-            print("[INFO] Уже авторизован.")
+            print("[STEP] Уже авторизован на сайте.")
         except NoSuchElementException:
-            print("[WARNING] Авторизация не прошла после загрузки куки.")
             await send_alert(f"❌ Авторизация не прошла на {url}")
             driver.quit()
             return
 
+        # Проверка капчи
+        if check_captcha(driver):
+            await send_alert(f"⚠️ Обнаружена капча на странице: {url}")
+            driver.quit()
+            return
+
+        # Ищем кнопку Сделать ставку
         try:
             bid_btn = wait.until(EC.element_to_be_clickable((By.ID, "add-bid")))
             bid_btn.click()
             print("[STEP] Нажата кнопка 'Сделать ставку'")
         except TimeoutException:
-            print("[WARNING] Кнопка 'Сделать ставку' не найдена — возможно капча или проект закрыт")
             await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
             driver.quit()
             return
 
+        # Заполняем форму ставки
         try:
             driver.find_element(By.ID, "amount-0").send_keys("1111")
             driver.find_element(By.ID, "days_to_deliver-0").send_keys("3")
             driver.find_element(By.ID, "comment-0").send_keys(COMMENT_TEXT)
             driver.find_element(By.ID, "add-0").click()
-            print("[SUCCESS] Ставка отправлена")
+            print("[STEP] Форма ставки заполнена и отправлена.")
             await send_alert(f"✅ Ставка успешно отправлена!\nСсылка: {url}")
         except Exception as e:
-            print(f"[ERROR] Не удалось заполнить форму ставки: {e}")
-            await send_alert(f"❌ Ошибка при отправке ставки: {e}\nСсылка: {url}")
+            await send_alert(f"❌ Ошибка при заполнении формы ставки: {e}\nСсылка: {url}")
 
     except Exception as e:
-        print(f"[ERROR] Ошибка при обработке проекта: {e}")
         await send_alert(f"❌ Ошибка при обработке проекта: {e}\nСсылка: {url}")
-
     finally:
         driver.quit()
-        print("[INFO] Браузер закрыт.")
+        print("[STEP] Браузер закрыт.")
 
-# ===== Телеграм =====
+# ===== Telegram =====
 client = TelegramClient("session", api_id, api_hash)
 
 @client.on(events.NewMessage)
