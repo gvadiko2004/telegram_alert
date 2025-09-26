@@ -1,0 +1,11 @@
+[40511:40511:0926/125826.744006:INFO:components/enterprise/browser/controller/chrome_browser_cloud_management_controller.cc:206] No machine level policy manager exists.
+[40545:40545:0926/125827.509666:WARNING:ui/gfx/linux/gpu_memory_buffer_support_x11.cc:49] dri3 extension not supported.
+[40545:40545:0926/125827.529321:WARNING:sandbox/policy/linux/sandbox_linux.cc:414] InitializeSandbox() called with multiple threads in process gpu-process.
+[40511:40511:0926/125827.579429:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files
+[40511:40511:0926/125827.580630:WARNING:dbus/property.cc:179] GetAll request failed for: org.freedesktop.UPower.Device
+[40511:40511:0926/125827.644624:WARNING:ui/base/idle/idle_linux.cc:98] None of the known D-Bus ScreenSaver services could be used.
+[40511:40511:0926/125830.189568:INFO:CONSOLE:327] "%c%s color: red; background: yellow; font-size: 24px; WARNING!", source: https://www.gstatic.com/_/mss/boq-chrome-webstore/_/js/k=boq-chrome-webstore.ChromeWebStoreConsumerFeUi.en_US.TcBJ1sDjZRM.2018.O/am=SJECAgO2ACA/d=1/excm=_b,_tp,itemdetailview/ed=1/dg=0/wt=2/ujg=1/rs=AEP720KQVh78xYHM41bQVNPmU1vKN4WuOQ/dti=1/m=_b,_tp (327)
+[40511:40511:0926/125830.191996:INFO:CONSOLE:327] "%c%s font-size: 18px; Using this console may allow attackers to impersonate you and steal your information using an attack called Self-XSS.
+Do not enter or paste code that you do not understand.", source: https://www.gstatic.com/_/mss/boq-chrome-webstore/_/js/k=boq-chrome-webstore.ChromeWebStoreConsumerFeUi.en_US.TcBJ1sDjZRM.2018.O/am=SJECAgO2ACA/d=1/excm=_b,_tp,itemdetailview/ed=1/dg=0/wt=2/ujg=1/rs=AEP720KQVh78xYHM41bQVNPmU1vKN4WuOQ/dti=1/m=_b,_tp (327)
+[40511:40530:0926/125835.641414:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR
+[40511:40530:0926/125835.642689:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR
