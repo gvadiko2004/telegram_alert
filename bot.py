@@ -16,6 +16,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
+from twocaptcha import TwoCaptcha
 
 # ===== Настройки Telegram =====
 api_id = 21882740
@@ -45,6 +46,10 @@ LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_BUTTON_SELECTOR = "a.inline-block.link-no-underline"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
 
+# ===== Настройки 2Captcha =====
+CAPTCHA_API_KEY = "898059857fb8c709ca5c9613d44ffae4"
+solver = TwoCaptcha(CAPTCHA_API_KEY)
+
 # ===== Функции =====
 def extract_links(text: str):
     return [link for link in re.findall(r"https?://[^\s]+", text)
@@ -60,7 +65,10 @@ def load_cookies(driver):
         with open(COOKIES_FILE, "rb") as f:
             cookies = pickle.load(f)
         for cookie in cookies:
-            driver.add_cookie(cookie)
+            try:
+                driver.add_cookie(cookie)
+            except Exception:
+                pass
         print("[STEP] Cookies загружены.")
         return True
     return False
@@ -78,71 +86,80 @@ def create_driver():
 def wait_for_page_load(driver, timeout=15):
     try:
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        print("[STEP] Страница полностью загружена.")
         time.sleep(2)
     except TimeoutException:
         print("[WARNING] Таймаут ожидания загрузки страницы.")
 
 def human_typing(element, text, delay_range=(0.05, 0.15)):
-    """Ввод текста по символам с задержкой, как человек."""
     for char in text:
         element.send_keys(char)
         time.sleep(random.uniform(*delay_range))
 
+def solve_recaptcha(driver):
+    try:
+        iframe = driver.find_element(By.CSS_SELECTOR, "iframe[src*='recaptcha']")
+        driver.switch_to.frame(iframe)
+        sitekey = iframe.get_attribute("src").split("k=")[1].split("&")[0]
+        driver.switch_to.default_content()
+        url = driver.current_url
+        print("[STEP] Отправка капчи на 2Captcha...")
+        result = solver.recaptcha(sitekey=sitekey, url=url)
+        token = result['code']
+        inject_js = """
+        (function(token){
+          var el = document.getElementById('g-recaptcha-response');
+          if(!el){
+            el = document.createElement('textarea');
+            el.id = 'g-recaptcha-response';
+            el.name = 'g-recaptcha-response';
+            el.style.display = 'none';
+            document.body.appendChild(el);
+          }
+          el.value = token;
+        })(arguments[0]);
+        """
+        driver.execute_script(inject_js, token)
+        time.sleep(1)
+        print("[STEP] Капча решена и токен вставлен.")
+    except Exception as e:
+        print(f"[ERROR] Не удалось решить капчу: {e}")
+
 def check_captcha(driver):
     try:
-        body_text = driver.find_element(By.TAG_NAME, "body").text
-        if "капча" in body_text.lower() or "captcha" in body_text.lower():
-            print("[WARNING] На странице обнаружена капча!")
+        if driver.find_elements(By.CSS_SELECTOR, "iframe[src*='recaptcha']"):
+            print("[INFO] reCAPTCHA обнаружена.")
+            solve_recaptcha(driver)
             return True
     except Exception:
         pass
     return False
 
 def login(driver):
-    # Если есть кнопка "Вхід" — нажать через JS
     try:
         login_btn = driver.find_element(By.CSS_SELECTOR, LOGIN_BUTTON_SELECTOR)
         driver.execute_script("arguments[0].click();", login_btn)
-        print("[STEP] Нажата кнопка 'Вхід', переходим на страницу логина через JS.")
-        time.sleep(3)
+        time.sleep(2)
     except NoSuchElementException:
-        print("[INFO] Кнопка 'Вхід' не найдена, возможно уже на странице логина.")
-
+        pass
     driver.get(LOGIN_URL)
-    print(f"[STEP] Переход на страницу логина: {LOGIN_URL}")
     wait_for_page_load(driver)
-
     try:
         login_input = driver.find_element(By.ID, "login-0")
         password_input = driver.find_element(By.ID, "password-0")
-        login_submit = driver.find_element(By.ID, "save-0")
-        print("[STEP] Поля Логин и Пароль найдены.")
-
+        submit_btn = driver.find_element(By.ID, "save-0")
         human_typing(login_input, LOGIN_DATA["login"])
-        print(f"[STEP] Введен логин: {LOGIN_DATA['login']}")
-        time.sleep(0.5)
         human_typing(password_input, LOGIN_DATA["password"])
-        print(f"[STEP] Введен пароль.")
-
-        driver.execute_script("arguments[0].click();", login_submit)
-        print("[STEP] Нажата кнопка 'Увійти' через JS.")
+        driver.execute_script("arguments[0].click();", submit_btn)
         time.sleep(5)
         wait_for_page_load(driver)
-
-        if check_captcha(driver):
-            raise Exception("Капча обнаружена после попытки логина.")
-
+        check_captcha(driver)
         save_cookies(driver)
-        print("[STEP] Авторизация пройдена и куки сохранены.")
-
-    except NoSuchElementException:
-        raise Exception("Поля логина/пароля или кнопка не найдены — возможно капча.")
+    except Exception as e:
+        print(f"[ERROR] Ошибка логина: {e}")
 
 async def send_alert(message: str):
     try:
         await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=message)
-        print(f"[STEP] Отправлено уведомление в Telegram: {message}")
     except Exception as e:
         print(f"[ERROR] Не удалось отправить уведомление: {e}")
 
@@ -150,50 +167,29 @@ async def make_bid(url):
     driver = create_driver()
     try:
         driver.get(url)
-        print(f"[STEP] Перешли на страницу проекта: {url}")
         wait_for_page_load(driver)
-
         if not load_cookies(driver):
-            print("[STEP] Cookies нет, нужна авторизация.")
             login(driver)
             driver.get(url)
             wait_for_page_load(driver)
-            print(f"[STEP] Вернулись на страницу проекта после логина: {url}")
-
-        if check_captcha(driver):
-            await send_alert(f"⚠️ Обнаружена капча на странице: {url}")
-            driver.quit()
-            return
-
+        check_captcha(driver)
         try:
-            bid_btn = WebDriverWait(driver, 15).until(
-                EC.element_to_be_clickable((By.ID, "add-bid"))
-            )
+            bid_btn = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.ID, "add-bid")))
             time.sleep(1)
             bid_btn.click()
-            print("[STEP] Нажата кнопка 'Сделать ставку'")
         except TimeoutException:
             await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
-            driver.quit()
             return
-
-        # Заполняем форму
-        try:
-            human_typing(driver.find_element(By.ID, "amount-0"), "1111")
-            human_typing(driver.find_element(By.ID, "days_to_deliver-0"), "3")
-            human_typing(driver.find_element(By.ID, "comment-0"), COMMENT_TEXT, delay_range=(0.02,0.08))
-            time.sleep(1)
-            driver.find_element(By.ID, "add-0").click()
-            print("[STEP] Форма ставки заполнена и отправлена.")
-            await send_alert(f"✅ Ставка успешно отправлена!\nСсылка: {url}")
-        except Exception as e:
-            await send_alert(f"❌ Ошибка при заполнении формы ставки: {e}\nСсылка: {url}")
-
+        human_typing(driver.find_element(By.ID, "amount-0"), "1111")
+        human_typing(driver.find_element(By.ID, "days_to_deliver-0"), "3")
+        human_typing(driver.find_element(By.ID, "comment-0"), COMMENT_TEXT, delay_range=(0.02,0.08))
+        time.sleep(1)
+        driver.find_element(By.ID, "add-0").click()
+        await send_alert(f"✅ Ставка успешно отправлена!\nСсылка: {url}")
     except Exception as e:
         await send_alert(f"❌ Ошибка при обработке проекта: {e}\nСсылка: {url}")
     finally:
         driver.quit()
-        print("[STEP] Браузер закрыт.")
 
 # ===== Telegram =====
 client = TelegramClient("session", api_id, api_hash)
@@ -203,17 +199,12 @@ async def handler(event):
     text = (event.message.text or "").lower()
     links = extract_links(text)
     if any(k in text for k in KEYWORDS) and links:
-        print(f"[INFO] Подходит ссылка: {links[0]}")
         await make_bid(links[0])
-        print("[INFO] Готов к следующему проекту")
 
 # ===== Запуск =====
 async def main():
-    print("[INFO] Запуск бота уведомлений...")
     await alert_bot.initialize()
-    print("[INFO] Бот уведомлений запущен.")
     await client.start()
-    print("[INFO] Telegram бот запущен. Ожидаем новые проекты...")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
