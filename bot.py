@@ -111,8 +111,10 @@ def human_scroll_and_move():
         pass
 
 def extract_links(text):
-    text = text.replace("*", "")
-    return [ln for ln in re.findall(r"https?://[^\s]+", text) if "freelancehunt.com" in ln]
+    # Прибираємо всі можливі символи форматування Markdown
+    cleaned = re.sub(r"[*_`]+", "", text)
+    # Витягуємо тільки правильні URL
+    return [ln.strip() for ln in re.findall(r"https?://[a-zA-Z0-9./?&=_%#\-]+", cleaned) if "freelancehunt.com" in ln]
 
 async def send_alert(msg):
     safe_msg = msg.replace("*", "").replace("_", "").replace("`", "")
