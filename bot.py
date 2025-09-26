@@ -33,16 +33,16 @@ KEYWORDS = [k.lower() for k in [
 # -------- INIT --------
 alert_bot = Bot(token=ALERT_BOT_TOKEN)
 tg_client = TelegramClient("session", API_ID, API_HASH)
-solver = TwoCaptcha(CAPTCHA_API_KEY)
+solver = None
 
 # -------- UTILS --------
 def ensure_dns(host="freelancehunt.com"):
     try:
         ip = socket.gethostbyname(host)
-        print(f"[СЕТЬ] DNS ок: {host} -> {ip}")
+        print(f"[СЕТЬ] DNS OK: {host} -> {ip}")
         return True
     except:
-        print(f"[СЕТЬ] DNS ошибка: {host}")
+        print(f"[СЕТЬ] DNS НЕУДАЛОСЬ: {host}")
         return False
 
 def tmp_profile():
@@ -61,7 +61,7 @@ def driver_create():
     opts.add_experimental_option("useAutomationExtension", False)
     drv = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
     drv.set_page_load_timeout(60)
-    print("[ШАГ] Chrome готов, HEADLESS =", HEADLESS)
+    print(f"[ШАГ] Chrome готов, HEADLESS={HEADLESS}")
     return drv
 
 driver = driver_create()
@@ -71,7 +71,7 @@ def wait_body(timeout=20):
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME,"body")))
         time.sleep(0.3)
     except TimeoutException:
-        print("[WARN] Время загрузки страницы истекло")
+        print("[ПРЕДУПРЕЖДЕНИЕ] Таймаут загрузки страницы")
 
 def human_type(el, txt, delay=(0.04,0.12)):
     for ch in txt:
@@ -85,7 +85,8 @@ def human_scroll():
     ActionChains(driver).move_by_offset(random.randint(1,50), random.randint(1,50)).perform()
 
 def save_cookies():
-    with open(COOKIES_FILE,"wb") as f: pickle.dump(driver.get_cookies(),f)
+    with open(COOKIES_FILE,"wb") as f:
+        pickle.dump(driver.get_cookies(),f)
 
 def load_cookies():
     if not os.path.exists(COOKIES_FILE): return False
@@ -95,7 +96,7 @@ def load_cookies():
             except: pass
     return True
 
-def logged_in(): 
+def logged_in():
     try:
         driver.find_element(By.CSS_SELECTOR,"a[href='/profile']")
         return True
@@ -114,19 +115,22 @@ def login():
         time.sleep(2)
         wait_body()
         save_cookies()
-        print("[LOGIN] Вход выполнен")
+        print("[АВТОРИЗАЦИЯ] Вход выполнен")
         return True
     except Exception as e:
-        print("[LOGIN ERROR]", e)
+        print("[АВТОРИЗАЦИЯ] Ошибка:", e)
         return False
 
-async def send_alert(msg):
-    try:
-        await alert_bot.send_message(chat_id=ALERT_CHAT_ID,text=msg)
-        print("[TG ALERT]", msg)
-    except: pass
-
 # -------- CAPTCHA --------
+def init_captcha():
+    global solver
+    if CAPTCHA_API_KEY:
+        solver = TwoCaptcha(CAPTCHA_API_KEY)
+        print("[CAPTCHA] Анти-капча инициализирована и готова к работе")
+    else:
+        solver = None
+        print("[CAPTCHA] Ключ API не задан, работа капчи отключена")
+
 def solve_captcha():
     try:
         frames = driver.find_elements(By.TAG_NAME, "iframe")
@@ -141,38 +145,42 @@ def solve_captcha():
                 driver.execute_script('___grecaptcha_cfg.clients[0].R.R.callback(arguments[0]);', code)
                 print("[CAPTCHA] Решение выполнено")
                 return True
+        print("[CAPTCHA] Капча на странице не найдена")
         return False
     except Exception as e:
         print("[CAPTCHA ERROR]", e)
         return False
 
+async def send_alert(msg):
+    try:
+        await alert_bot.send_message(chat_id=ALERT_CHAT_ID,text=msg)
+        print("[TG ALERT]",msg)
+    except: pass
+
 # -------- BID --------
 async def make_bid(url):
     try:
-        if not ensure_dns(): await send_alert(f"⚠️ DNS не работает {url}"); return
+        if not ensure_dns(): await send_alert(f"⚠️ DNS failed {url}"); return
         driver.get(url)
         wait_body()
         load_cookies()
         if not logged_in(): login(); driver.get(url); wait_body()
         
+        solve_captcha()  # Проверка/решение капчи перед ставкой
+
         # --- Клик "Сделать ставку" ---
         WebDriverWait(driver,5).until(EC.element_to_be_clickable((By.ID,"add-bid"))).click()
-        print("[ШАГ] Клик 'Сделать ставку'")
-        time.sleep(0.5); human_scroll()
-
-        # --- Решаем капчу ---
-        if solve_captcha():
-            print("[ШАГ] Капча решена")
-        else:
-            print("[ШАГ] Капчи нет или пропущена")
+        time.sleep(0.5)
+        human_scroll()
 
         # --- Определяем сумму ---
         try:
             span = driver.find_element(By.CSS_SELECTOR,"span.text-green.bold.pull-right.price")
             amount = re.sub(r"[^\d\.]", "", span.text)
+            print(f"[СТАВКА] Сумма определена: {amount}")
         except Exception:
             amount = "1111"
-        print(f"[ШАГ] Сумма для ставки: {amount}")
+            print(f"[СТАВКА] Используется стандартная сумма: {amount}")
 
         # --- Заполняем форму ---
         human_type(driver.find_element(By.ID,"amount-0"), amount)
@@ -182,16 +190,14 @@ async def make_bid(url):
 
         # --- Финальный клик "Добавить" ---
         driver.execute_script("document.getElementById('btn-submit-0').click();")
-        print("[ШАГ] Ставка отправлена")
         await send_alert(f"✅ Ставка отправлена: {url}")
         save_cookies()
     except Exception as e:
-        print("[ERROR]", e)
         await send_alert(f"❌ Ошибка: {e}\n{url}")
+        print("[ОШИБКА]", e)
 
 # -------- TELEGRAM --------
-def extract_links(txt):
-    return [ln for ln in txt.split() if "freelancehunt.com" in ln]
+def extract_links(txt): return [ln for ln in txt.split() if "freelancehunt.com" in ln]
 
 @tg_client.on(events.NewMessage)
 async def on_msg(event):
@@ -203,6 +209,7 @@ async def on_msg(event):
 # -------- MAIN --------
 async def main():
     ensure_dns()
+    init_captcha()
     if os.path.exists(COOKIES_FILE):
         driver.get("https://freelancehunt.com")
         wait_body()
@@ -210,12 +217,12 @@ async def main():
         driver.refresh()
         wait_body()
     await tg_client.start()
-    print("[ШАГ] Клиент Telegram запущен")
+    print("[ШАГ] Telegram клиент запущен")
     await tg_client.run_until_disconnected()
 
 if __name__=="__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Выход")
+        print("[ВЫХОД] Завершение работы")
         driver.quit()
