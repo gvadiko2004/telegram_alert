@@ -89,6 +89,16 @@ def human_typing(element, text, delay_range=(0.05, 0.15)):
         element.send_keys(char)
         time.sleep(random.uniform(*delay_range))
 
+def check_captcha(driver):
+    try:
+        body_text = driver.find_element(By.TAG_NAME, "body").text
+        if "капча" in body_text.lower() or "captcha" in body_text.lower():
+            print("[WARNING] На странице обнаружена капча!")
+            return True
+    except Exception:
+        pass
+    return False
+
 def login(driver):
     # Если есть кнопка "Вхід" — нажать через JS
     try:
@@ -120,11 +130,14 @@ def login(driver):
         time.sleep(5)
         wait_for_page_load(driver)
 
+        if check_captcha(driver):
+            raise Exception("Капча обнаружена после попытки логина.")
+
         save_cookies(driver)
         print("[STEP] Авторизация пройдена и куки сохранены.")
 
     except NoSuchElementException:
-        raise Exception("Поля логина/пароля или кнопка не найдены.")
+        raise Exception("Поля логина/пароля или кнопка не найдены — возможно капча.")
 
 async def send_alert(message: str):
     try:
@@ -146,6 +159,11 @@ async def make_bid(url):
             driver.get(url)
             wait_for_page_load(driver)
             print(f"[STEP] Вернулись на страницу проекта после логина: {url}")
+
+        if check_captcha(driver):
+            await send_alert(f"⚠️ Обнаружена капча на странице: {url}")
+            driver.quit()
+            return
 
         try:
             bid_btn = WebDriverWait(driver, 15).until(
