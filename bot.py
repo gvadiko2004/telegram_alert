@@ -2,6 +2,9 @@
 # coding: utf-8
 """
 Telegram + Selenium bot for Freelancehunt on VPS
+- Headless Chrome
+- Inline button URL extraction
+- 2captcha support for reCAPTCHA v2
 """
 
 import os
@@ -186,7 +189,7 @@ def inject_recaptcha_token(token):
         print(f"[inject token error] {e}")
         return False
 
-# ---------------- Login flow ----------------
+# ---------------- Login ----------------
 def login_if_needed():
     driver.get(LOGIN_URL)
     wait_for_body()
@@ -235,17 +238,28 @@ async def make_bid(url):
             return
         driver.get(url)
         wait_for_body()
-    # TODO: fill bid form here (как у тебя выше)
+    # TODO: здесь добавь заполнение формы как у тебя в локальном скрипте
     await send_alert(f"✅ Ready to bid: {url}")
 
-# ---------------- Telegram ----------------
-def extract_links(text):
-    return [ln for ln in re.findall(r"https?://[^\s]+", text) if "freelancehunt.com" in ln]
+# ---------------- Telegram handlers ----------------
+def extract_links_from_msg(event):
+    links = []
+    text = (event.message.text or "").lower()
+    # ищем обычные ссылки в тексте
+    links.extend([ln for ln in re.findall(r"https?://[^\s]+", text) if "freelancehunt.com" in ln])
+    # ищем ссылки на кнопках
+    if hasattr(event.message, "reply_markup") and event.message.reply_markup:
+        for row in event.message.reply_markup.rows:
+            for button in row.buttons:
+                if getattr(button, "url", None):
+                    if "freelancehunt.com" in button.url.lower():
+                        links.append(button.url)
+    return links
 
 @tg_client.on(events.NewMessage)
 async def on_msg(event):
+    links = extract_links_from_msg(event)
     text = (event.message.text or "").lower()
-    links = extract_links(text)
     if links and any(k in text for k in KEYWORDS):
         url = links[0]
         await make_bid(url)
