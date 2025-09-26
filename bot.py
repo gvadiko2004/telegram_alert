@@ -36,13 +36,15 @@ tg_client = TelegramClient("session", API_ID, API_HASH)
 solver = None
 
 # -------- UTILS --------
+def log(msg): print(f"[ЛОГ] {msg}")
+
 def ensure_dns(host="freelancehunt.com"):
     try:
         ip = socket.gethostbyname(host)
-        print(f"[СЕТЬ] DNS OK: {host} -> {ip}")
+        log(f"DNS OK: {host} -> {ip}")
         return True
     except:
-        print(f"[СЕТЬ] DNS НЕУДАЛОСЬ: {host}")
+        log(f"DNS НЕУДАЛОСЬ: {host}")
         return False
 
 def tmp_profile():
@@ -61,7 +63,7 @@ def driver_create():
     opts.add_experimental_option("useAutomationExtension", False)
     drv = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
     drv.set_page_load_timeout(60)
-    print(f"[ШАГ] Chrome готов, HEADLESS={HEADLESS}")
+    log(f"Chrome готов, HEADLESS={HEADLESS}")
     return drv
 
 driver = driver_create()
@@ -71,7 +73,7 @@ def wait_body(timeout=20):
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME,"body")))
         time.sleep(0.3)
     except TimeoutException:
-        print("[ПРЕДУПРЕЖДЕНИЕ] Таймаут загрузки страницы")
+        log("Таймаут загрузки страницы")
 
 def human_type(el, txt, delay=(0.04,0.12)):
     for ch in txt:
@@ -115,10 +117,10 @@ def login():
         time.sleep(2)
         wait_body()
         save_cookies()
-        print("[АВТОРИЗАЦИЯ] Вход выполнен")
+        log("Авторизация успешна")
         return True
     except Exception as e:
-        print("[АВТОРИЗАЦИЯ] Ошибка:", e)
+        log(f"Ошибка авторизации: {e}")
         return False
 
 # -------- CAPTCHA --------
@@ -126,47 +128,57 @@ def init_captcha():
     global solver
     if CAPTCHA_API_KEY:
         solver = TwoCaptcha(CAPTCHA_API_KEY)
-        print("[CAPTCHA] Анти-капча инициализирована и готова к работе")
+        log("Анти-капча инициализирована и готова к работе")
     else:
         solver = None
-        print("[CAPTCHA] Ключ API не задан, работа капчи отключена")
+        log("Ключ API не задан, капча отключена")
 
 def solve_captcha():
     try:
         frames = driver.find_elements(By.TAG_NAME, "iframe")
         for f in frames:
             if "recaptcha" in f.get_attribute("src"):
-                print("[CAPTCHA] Обнаружена reCAPTCHA")
+                log("Обнаружена reCAPTCHA")
                 sitekey = re.search(r"sitekey=([a-zA-Z0-9_-]+)", f.get_attribute("src")).group(1)
                 url = driver.current_url
                 result = solver.recaptcha(sitekey=sitekey, url=url)
                 code = result.get("code")
                 driver.execute_script(f'document.getElementById("g-recaptcha-response").innerHTML="{code}";')
                 driver.execute_script('___grecaptcha_cfg.clients[0].R.R.callback(arguments[0]);', code)
-                print("[CAPTCHA] Решение выполнено")
+                log("Капча решена")
                 return True
-        print("[CAPTCHA] Капча на странице не найдена")
+        log("Капча на странице не найдена")
         return False
     except Exception as e:
-        print("[CAPTCHA ERROR]", e)
+        log(f"Ошибка капчи: {e}")
         return False
 
 async def send_alert(msg):
     try:
         await alert_bot.send_message(chat_id=ALERT_CHAT_ID,text=msg)
-        print("[TG ALERT]",msg)
+        log(f"TG ALERT: {msg}")
     except: pass
 
 # -------- BID --------
 async def make_bid(url):
     try:
-        if not ensure_dns(): await send_alert(f"⚠️ DNS failed {url}"); return
+        if not ensure_dns(): await send_alert(f"DNS не удалось {url}"); return
         driver.get(url)
         wait_body()
         load_cookies()
         if not logged_in(): login(); driver.get(url); wait_body()
-        
-        solve_captcha()  # Проверка/решение капчи перед ставкой
+
+        solve_captcha()
+
+        # --- Проверка "ставка уже сделана" ---
+        try:
+            alert_el = driver.find_element(By.CSS_SELECTOR,"div.alert.alert-info")
+            text = alert_el.text
+            log(f"Ставка уже сделана или закрыта: {text}")
+            await send_alert(f"⚠️ Ставка уже сделана или закрыта: {url}")
+            return
+        except NoSuchElementException:
+            pass
 
         # --- Клик "Сделать ставку" ---
         WebDriverWait(driver,5).until(EC.element_to_be_clickable((By.ID,"add-bid"))).click()
@@ -177,10 +189,10 @@ async def make_bid(url):
         try:
             span = driver.find_element(By.CSS_SELECTOR,"span.text-green.bold.pull-right.price")
             amount = re.sub(r"[^\d\.]", "", span.text)
-            print(f"[СТАВКА] Сумма определена: {amount}")
+            log(f"Сумма определена: {amount}")
         except Exception:
             amount = "1111"
-            print(f"[СТАВКА] Используется стандартная сумма: {amount}")
+            log(f"Используется стандартная сумма: {amount}")
 
         # --- Заполняем форму ---
         human_type(driver.find_element(By.ID,"amount-0"), amount)
@@ -194,7 +206,7 @@ async def make_bid(url):
         save_cookies()
     except Exception as e:
         await send_alert(f"❌ Ошибка: {e}\n{url}")
-        print("[ОШИБКА]", e)
+        log(f"Ошибка при ставке: {e}")
 
 # -------- TELEGRAM --------
 def extract_links(txt): return [ln for ln in txt.split() if "freelancehunt.com" in ln]
@@ -217,12 +229,12 @@ async def main():
         driver.refresh()
         wait_body()
     await tg_client.start()
-    print("[ШАГ] Telegram клиент запущен")
+    log("Telegram клиент запущен")
     await tg_client.run_until_disconnected()
 
 if __name__=="__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("[ВЫХОД] Завершение работы")
+        log("Завершение работы")
         driver.quit()
