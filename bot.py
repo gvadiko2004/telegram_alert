@@ -52,7 +52,6 @@ KEYWORDS = [
     "#создание_сайта_под_ключ",
     "#дизайн_сайтов"
 ]
-KEYWORDS = [k.lower() for k in KEYWORDS]
 
 COMMENT_TEXT = (
     "Доброго дня! Готовий виконати роботу якісно.\n"
@@ -195,12 +194,13 @@ def login_if_needed():
 
 # ---------------- Telegram / Bidding ----------------
 def extract_links(text):
-    return [ln for ln in re.findall(r"https?://[^\s]+", text.lower()) if "freelancehunt.com" in ln]
+    # Сохраняем ссылки в оригинальном виде, без ** и lower()
+    return [ln for ln in re.findall(r"https?://[^\s]+", text) if "freelancehunt.com" in ln]
 
 async def send_alert(msg):
     try:
-        await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=msg)
-        print("[TG ALERT] " + msg)
+        await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=msg, parse_mode=None)
+        print("[TG ALERT]", msg)
     except Exception as e:
         print("[TG ERROR]", e)
 
@@ -211,7 +211,6 @@ async def make_bid(url):
         login_if_needed()
         time.sleep(1)
 
-        # Нажатие кнопки "Сделать ставку"
         try:
             bid_btn = WebDriverWait(driver, 12).until(
                 EC.element_to_be_clickable((By.ID, "add-bid"))
@@ -224,7 +223,6 @@ async def make_bid(url):
             await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
             return
 
-        # Заполнение формы
         try:
             amount = driver.find_element(By.ID, "amount-0")
             days = driver.find_element(By.ID, "days_to_deliver-0")
@@ -249,7 +247,7 @@ async def on_msg(event):
     text = event.message.text or ""
     print("[TG MESSAGE]", text)
     links = extract_links(text)
-    if links and any(k in text.lower() for k in KEYWORDS):
+    if links and any(k.lower() in text.lower() for k in KEYWORDS):
         await make_bid(links[0])
 
 # ---------------- Main ----------------
