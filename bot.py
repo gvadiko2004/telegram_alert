@@ -74,15 +74,6 @@ def create_driver():
     print("[STEP] Chrome запущен (видимый режим).")
     return driver
 
-def wait_for_page_load(driver, timeout=15):
-    """Ждем загрузки body и паузу, чтобы страница полностью прогрузилась."""
-    try:
-        WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        print("[STEP] Страница полностью загружена.")
-        time.sleep(2)  # дополнительная пауза для всех JS элементов
-    except TimeoutException:
-        print("[WARNING] Таймаут ожидания загрузки страницы.")
-
 def check_captcha(driver):
     try:
         text = driver.find_element(By.TAG_NAME, "body").text
@@ -95,32 +86,26 @@ def check_captcha(driver):
 
 def login(driver):
     driver.get(LOGIN_URL)
-    print(f"[STEP] Переход на страницу логина: {LOGIN_URL}")
-    wait_for_page_load(driver)
-
+    print(f"[STEP] Перешли на страницу логина: {LOGIN_URL}")
+    wait = WebDriverWait(driver, 20)
     try:
+        # Ищем поля относительно текста Логин и Пароль
         login_input = driver.find_element(By.XPATH, "//label[contains(text(),'Логин')]/following-sibling::div//input")
         password_input = driver.find_element(By.XPATH, "//label[contains(text(),'Пароль')]/following-sibling::div//input")
         login_button = driver.find_element(By.ID, "save-0")
-
         print("[STEP] Найдены поля Логин, Пароль и кнопка Войти.")
 
-        time.sleep(1)
         login_input.clear()
         login_input.send_keys(LOGIN_DATA["login"])
         print(f"[STEP] Ввели логин: {LOGIN_DATA['login']}")
 
-        time.sleep(1)
         password_input.clear()
         password_input.send_keys(LOGIN_DATA["password"])
         print(f"[STEP] Ввели пароль.")
 
-        time.sleep(1)
         login_button.click()
         print("[STEP] Нажата кнопка Войти.")
-
         time.sleep(5)
-        wait_for_page_load(driver)
 
         if check_captcha(driver):
             raise Exception("Капча обнаружена после попытки логина.")
@@ -140,18 +125,20 @@ async def send_alert(message: str):
 
 async def make_bid(url):
     driver = create_driver()
+    wait = WebDriverWait(driver, 20)
     try:
         driver.get(url)
         print(f"[STEP] Перешли на страницу проекта: {url}")
-        wait_for_page_load(driver)
+        time.sleep(3)
 
         if not load_cookies(driver):
             print("[STEP] Cookies нет, нужна авторизация.")
             login(driver)
             driver.get(url)
-            wait_for_page_load(driver)
             print(f"[STEP] Вернулись на страницу проекта после логина: {url}")
+            time.sleep(3)
 
+        # Проверка авторизации
         try:
             driver.find_element(By.CSS_SELECTOR, "a[href='/profile']")
             print("[STEP] Уже авторизован на сайте.")
@@ -160,14 +147,15 @@ async def make_bid(url):
             driver.quit()
             return
 
+        # Проверка капчи
         if check_captcha(driver):
             await send_alert(f"⚠️ Обнаружена капча на странице: {url}")
             driver.quit()
             return
 
+        # Ищем кнопку Сделать ставку
         try:
-            bid_btn = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.ID, "add-bid")))
-            time.sleep(1)
+            bid_btn = wait.until(EC.element_to_be_clickable((By.ID, "add-bid")))
             bid_btn.click()
             print("[STEP] Нажата кнопка 'Сделать ставку'")
         except TimeoutException:
@@ -175,12 +163,11 @@ async def make_bid(url):
             driver.quit()
             return
 
+        # Заполняем форму ставки
         try:
-            time.sleep(1)
             driver.find_element(By.ID, "amount-0").send_keys("1111")
             driver.find_element(By.ID, "days_to_deliver-0").send_keys("3")
             driver.find_element(By.ID, "comment-0").send_keys(COMMENT_TEXT)
-            time.sleep(1)
             driver.find_element(By.ID, "add-0").click()
             print("[STEP] Форма ставки заполнена и отправлена.")
             await send_alert(f"✅ Ставка успешно отправлена!\nСсылка: {url}")
