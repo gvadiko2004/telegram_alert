@@ -8,6 +8,7 @@ import time
 import random
 import asyncio
 import requests
+from twocaptcha import TwoCaptcha
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -53,15 +54,17 @@ COMMENT_TEXT = (
 alert_bot = Bot(token=ALERT_BOT_TOKEN)
 client = TelegramClient("session", api_id, api_hash)
 
+# ----------------- 2Captcha -----------------
+solver = TwoCaptcha(CAPTCHA_API_KEY)
+
 # ----------------- Selenium -----------------
-def create_chrome_driver(headless=False):
+def create_chrome_driver():
     chrome_options = Options()
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
-    if headless:
-        chrome_options.add_argument("--headless=new")
+    # chrome_options.add_argument("--headless=new")  # если хочешь видеть браузер, отключи headless
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option("useAutomationExtension", False)
 
@@ -71,7 +74,7 @@ def create_chrome_driver(headless=False):
     driver.set_page_load_timeout(60)
     return driver
 
-driver = create_chrome_driver(headless=False)
+driver = create_chrome_driver()
 print("[STEP] Chrome запущен.")
 time.sleep(1)
 
@@ -124,7 +127,6 @@ def page_contains_captcha_text():
         pass
     return False
 
-# ----------------- 2captcha -----------------
 def find_recaptcha_sitekey():
     try:
         elems = driver.find_elements(By.CSS_SELECTOR, "[data-sitekey]")
@@ -136,89 +138,65 @@ def find_recaptcha_sitekey():
         pass
     return None
 
-def wait_for_recaptcha_iframe(timeout=15):
-    try:
-        WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='recaptcha']"))
-        )
-        return True
-    except TimeoutException:
-        return False
-
-def submit_2captcha_recaptcha(sitekey, pageurl):
-    in_url = "http://2captcha.com/in.php"
-    res_url = "http://2captcha.com/res.php"
-    payload = {"key": CAPTCHA_API_KEY, "method": "userrecaptcha", "googlekey": sitekey, "pageurl": pageurl, "json": 1}
-    try:
-        r = requests.post(in_url, data=payload, timeout=30).json()
-        if r.get("status") != 1:
-            return None
-        task_id = r.get("request")
-        waited = 0
-        while waited < 180:
-            time.sleep(5)
-            waited += 5
-            r2 = requests.get(res_url, params={"key": CAPTCHA_API_KEY, "action": "get", "id": task_id, "json": 1}, timeout=30).json()
-            if r2.get("status") == 1:
-                return r2.get("request")
+def solve_recaptcha():
+    sitekey = find_recaptcha_sitekey()
+    if not sitekey:
         return None
-    except Exception:
+    try:
+        result = solver.recaptcha(sitekey=sitekey, url=driver.current_url)
+        token = result.get("code")
+        return token
+    except Exception as e:
+        print(f"[ERROR] 2Captcha solve failed: {e}")
         return None
 
 def inject_recaptcha_token_and_submit(token):
     try:
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        for f in iframes:
-            src = f.get_attribute("src") or ""
-            if "recaptcha" in src:
-                driver.switch_to.frame(f)
-                break
         driver.execute_script("""
-        var el = document.getElementById('g-recaptcha-response');
-        if(!el){
-            el = document.createElement('textarea');
-            el.id = 'g-recaptcha-response';
-            el.name = 'g-recaptcha-response';
-            el.style.display = 'none';
-            document.body.appendChild(el);
-        }
-        el.innerHTML = arguments[0];
+        (function(token){
+            var el = document.getElementById('g-recaptcha-response');
+            if(!el){
+                el = document.createElement('textarea');
+                el.id = 'g-recaptcha-response';
+                el.name = 'g-recaptcha-response';
+                el.style.display = 'none';
+                document.body.appendChild(el);
+            }
+            el.innerHTML = token;
+        })(arguments[0]);
         """, token)
-        driver.switch_to.default_content()
-        driver.execute_script("if(window.grecaptcha){for(var k in grecaptcha){try{grecaptcha[k].execute()}catch(e){}}}")
-        driver.execute_script("document.querySelectorAll('form').forEach(f => f.submit());")
+        try:
+            btn = driver.find_element(By.CSS_SELECTOR, "form button[type='submit'], form input[type='submit']")
+            driver.execute_script("arguments[0].click();", btn)
+        except Exception:
+            driver.execute_script("document.querySelectorAll('form').forEach(f => f.submit());")
         return True
     except Exception as e:
-        print(f"[ERROR] inject_recaptcha_token: {e}")
+        print(f"[ERROR] Inject token failed: {e}")
         return False
 
 # ----------------- Login -----------------
 def login_if_needed():
-    try:
-        driver.get(LOGIN_URL)
+    driver.get(LOGIN_URL)
+    wait_for_page_load()
+    if load_cookies():
+        driver.refresh()
         wait_for_page_load()
-        if load_cookies():
-            driver.refresh()
-            wait_for_page_load()
-        try:
-            login_input = driver.find_element(By.ID, "login-0")
-            password_input = driver.find_element(By.ID, "password-0")
-            login_btn = driver.find_element(By.ID, "save-0")
-            human_typing(login_input, LOGIN_DATA["login"])
-            human_typing(password_input, LOGIN_DATA["password"])
-            driver.execute_script("arguments[0].click();", login_btn)
-            time.sleep(3)
-            if page_contains_captcha_text() and wait_for_recaptcha_iframe():
-                sitekey = find_recaptcha_sitekey()
-                if sitekey:
-                    token = submit_2captcha_recaptcha(sitekey, driver.current_url)
-                    if token:
-                        inject_recaptcha_token_and_submit(token)
-            save_cookies()
-        except NoSuchElementException:
-            print("[INFO] Уже залогинен или поля не найдены.")
-    except Exception as e:
-        print(f"[ERROR] Login failed: {e}")
+    try:
+        login_input = driver.find_element(By.ID, "login-0")
+        password_input = driver.find_element(By.ID, "password-0")
+        login_btn = driver.find_element(By.ID, "save-0")
+        human_typing(login_input, LOGIN_DATA["login"])
+        human_typing(password_input, LOGIN_DATA["password"])
+        driver.execute_script("arguments[0].click();", login_btn)
+        time.sleep(3)
+        if page_contains_captcha_text():
+            token = solve_recaptcha()
+            if token:
+                inject_recaptcha_token_and_submit(token)
+        save_cookies()
+    except NoSuchElementException:
+        print("[INFO] Уже залогинен или поля не найдены.")
 
 # ----------------- Main logic -----------------
 async def send_alert(msg: str):
@@ -238,12 +216,10 @@ async def make_bid(url: str):
         driver.get(url)
         wait_for_page_load()
 
-    if page_contains_captcha_text() and wait_for_recaptcha_iframe():
-        sitekey = find_recaptcha_sitekey()
-        if sitekey:
-            token = submit_2captcha_recaptcha(sitekey, driver.current_url)
-            if token:
-                inject_recaptcha_token_and_submit(token)
+    if page_contains_captcha_text():
+        token = solve_recaptcha()
+        if token:
+            inject_recaptcha_token_and_submit(token)
 
     try:
         bid_btn = WebDriverWait(driver, 12).until(EC.element_to_be_clickable((By.ID, "add-bid")))
