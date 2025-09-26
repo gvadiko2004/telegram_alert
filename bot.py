@@ -297,7 +297,7 @@ def try_solve_recaptcha():
         return False
 
 # ---------------- EXTRACT LINKS (text + entities + buttons) ----------------
-url_regex = re.compile(r"https?://[^\s\)\]\}\>";]+", re.IGNORECASE)
+url_regex = re.compile(r"https?://[^\s\)\]\}]+", re.IGNORECASE)
 
 def extract_urls_from_message_object(message) -> list:
     """
