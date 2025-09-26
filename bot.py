@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-import os, time, random, pickle, asyncio, socket
+import os, time, random, pickle, asyncio, socket, re
 from pathlib import Path
 from twocaptcha import TwoCaptcha
 from selenium import webdriver
@@ -11,7 +11,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
@@ -36,17 +36,11 @@ tg_client = TelegramClient("session", API_ID, API_HASH)
 solver = TwoCaptcha(CAPTCHA_API_KEY) if CAPTCHA_API_KEY else None
 
 # -------- UTILS --------
-def ensure_dns(name="freelancehunt.com"):
-    try:
-        ip = socket.gethostbyname(name)
-        print(f"[NET] DNS ok: {name} -> {ip}")
-        return True
+def ensure_dns(host="freelancehunt.com"):
+    try: ip=socket.gethostbyname(host); print(f"[NET] DNS ok: {host} -> {ip}"); return True
     except: return False
 
-def tmp_profile():
-    tmp = f"/tmp/chrome-{int(time.time())}-{random.randint(0,9999)}"
-    Path(tmp).mkdir(parents=True, exist_ok=True)
-    return tmp
+def tmp_profile(): tmp=f"/tmp/chrome-{int(time.time())}-{random.randint(0,9999)}"; Path(tmp).mkdir(parents=True,exist_ok=True); return tmp
 
 def driver_create():
     opts = Options()
@@ -57,7 +51,7 @@ def driver_create():
     opts.add_argument(f"--user-data-dir={tmp_profile()}")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
-    drv = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
+    drv=webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
     drv.set_page_load_timeout(60)
     print("[STEP] Chrome ready, HEADLESS=", HEADLESS)
     return drv
@@ -65,7 +59,7 @@ def driver_create():
 driver = driver_create()
 
 def wait_body(timeout=20):
-    try: WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body"))); time.sleep(0.4)
+    try: WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME,"body"))); time.sleep(0.3)
     except TimeoutException: print("[WARN] page load timeout")
 
 def human_type(el, txt, delay=(0.04,0.12)):
@@ -106,7 +100,7 @@ def login():
         save_cookies()
         print("[LOGIN] done")
         return True
-    except Exception as e: print("[LOGIN ERROR]", e); return False
+    except Exception as e: print("[LOGIN ERROR]",e); return False
 
 async def send_alert(msg):
     try: await alert_bot.send_message(chat_id=ALERT_CHAT_ID,text=msg); print("[TG ALERT]",msg)
@@ -118,15 +112,25 @@ async def make_bid(url):
         if not ensure_dns(): await send_alert(f"⚠️ DNS failed {url}"); return
         driver.get(url); wait_body(); load_cookies()
         if not logged_in(): login(); driver.get(url); wait_body()
-        # клик по "Сделать ставку"
+
+        # --- Click "Сделать ставку" ---
         WebDriverWait(driver,5).until(EC.element_to_be_clickable((By.ID,"add-bid"))).click()
         time.sleep(0.5); human_scroll()
-        # заполняем форму
-        human_type(driver.find_element(By.ID,"amount-0"),"1111")
-        human_type(driver.find_element(By.ID,"days_to_deliver-0"),"3")
-        human_type(driver.find_element(By.ID,"comment-0"),COMMENT_TEXT,(0.02,0.07))
+
+        # --- Определяем сумму ---
+        try:
+            span = driver.find_element(By.CSS_SELECTOR,"span.text-green.bold.pull-right.price")
+            amount = re.sub(r"[^\d\.]", "", span.text)
+        except Exception:
+            amount = "1111"
+
+        # --- Заполняем форму ---
+        human_type(driver.find_element(By.ID,"amount-0"), amount)
+        human_type(driver.find_element(By.ID,"days_to_deliver-0"), "3")
+        human_type(driver.find_element(By.ID,"comment-0"), COMMENT_TEXT, (0.02,0.07))
         time.sleep(0.4)
-        # финальный клик "Добавить"
+
+        # --- Финальный клик "Добавить" ---
         driver.execute_script("document.getElementById('btn-submit-0').click();")
         await send_alert(f"✅ Ставка отправлена: {url}")
         save_cookies()
@@ -139,8 +143,7 @@ def extract_links(txt): return [ln for ln in txt.split() if "freelancehunt.com" 
 async def on_msg(event):
     txt = (event.message.text or "").lower()
     links = extract_links(txt)
-    if links and any(k in txt for k in KEYWORDS):
-        asyncio.create_task(make_bid(links[0]))
+    if links and any(k in txt for k in KEYWORDS): asyncio.create_task(make_bid(links[0]))
 
 # -------- MAIN --------
 async def main():
