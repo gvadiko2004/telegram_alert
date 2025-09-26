@@ -77,6 +77,21 @@ def create_driver():
     print("[STEP] Chrome запущен.")
     return driver
 
+def check_captcha(driver):
+    """Проверка на капчу на странице"""
+    try:
+        page_text = driver.page_source.lower()
+        if "captcha" in page_text or "пройдите капчу" in page_text:
+            print("[WARNING] Капча обнаружена на странице!")
+            return True
+        # Проверка iframe от Google reCAPTCHA
+        if driver.find_elements(By.CSS_SELECTOR, "iframe[src*='recaptcha']"):
+            print("[WARNING] reCAPTCHA iframe найден!")
+            return True
+    except Exception as e:
+        print(f"[ERROR] Ошибка при проверке капчи: {e}")
+    return False
+
 def login(driver):
     try:
         print(f"[STEP] Переход на страницу логина: {LOGIN_URL}")
@@ -95,6 +110,10 @@ def login(driver):
         submit_btn.click()
         print("[STEP] Нажата кнопка 'Увійти'")
         time.sleep(5)
+
+        if check_captcha(driver):
+            print("[ERROR] Капча после логина — авторизация невозможна.")
+            return False
 
         save_cookies(driver)
         print("[INFO] Авторизация успешна.")
@@ -121,6 +140,11 @@ async def make_bid(url):
         driver.get(url)
         time.sleep(3)
 
+        if check_captcha(driver):
+            await send_alert(f"⚠️ Капча обнаружена на странице проекта: {url}")
+            driver.quit()
+            return
+
         if not load_cookies(driver):
             print("[INFO] Cookies нет, нужна авторизация.")
             if not login(driver):
@@ -130,7 +154,11 @@ async def make_bid(url):
             driver.get(url)
             time.sleep(3)
 
-        # Проверка авторизации
+        if check_captcha(driver):
+            await send_alert(f"⚠️ Капча после авторизации на проекте: {url}")
+            driver.quit()
+            return
+
         try:
             driver.find_element(By.CSS_SELECTOR, "a[href='/profile']")
             print("[INFO] Уже авторизован.")
@@ -140,7 +168,6 @@ async def make_bid(url):
             driver.quit()
             return
 
-        # Кнопка "Сделать ставку"
         try:
             bid_btn = wait.until(EC.element_to_be_clickable((By.ID, "add-bid")))
             bid_btn.click()
@@ -151,7 +178,6 @@ async def make_bid(url):
             driver.quit()
             return
 
-        # Заполняем форму
         try:
             driver.find_element(By.ID, "amount-0").send_keys("1111")
             driver.find_element(By.ID, "days_to_deliver-0").send_keys("3")
