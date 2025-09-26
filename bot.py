@@ -170,25 +170,28 @@ def login_if_needed():
         return False
 
 # ---------------- Telegram / Bidding ----------------
-def extract_links(text):
+def extract_links(text: str):
     """Возвращает чистые ссылки без звездочек"""
+    text = text.replace("*", "")  # убираем звёздочки
     return [ln for ln in re.findall(r"https?://[^\s]+", text) if "freelancehunt.com" in ln]
 
-async def send_alert(msg):
+async def send_alert(msg: str):
     try:
-        # parse_mode=None убирает любые ** и форматирование
-        await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=msg, parse_mode=None)
-        print("[TG ALERT]", msg)
+        # Убираем любые спецсимволы Telegram
+        safe_msg = msg.replace("*", "").replace("_", "").replace("`", "")
+        await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=safe_msg, parse_mode=None)
+        print("[TG ALERT]", safe_msg)
     except Exception as e:
         print("[TG ERROR]", e)
 
-async def make_bid(url):
+async def make_bid(url: str):
     try:
         driver.get(url)
         wait_for_body()
         login_if_needed()
         time.sleep(1)
 
+        # Кнопка "Сделать ставку"
         try:
             bid_btn = WebDriverWait(driver, 12).until(
                 EC.element_to_be_clickable((By.ID, "add-bid"))
@@ -201,6 +204,7 @@ async def make_bid(url):
             await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
             return
 
+        # Заполнение формы
         try:
             amount = driver.find_element(By.ID, "amount-0")
             days = driver.find_element(By.ID, "days_to_deliver-0")
