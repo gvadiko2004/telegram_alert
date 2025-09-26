@@ -67,6 +67,7 @@ def load_cookies(driver):
     return False
 
 def create_driver():
+    print("[STEP] Запуск виртуального Chrome...")
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
@@ -75,22 +76,41 @@ def create_driver():
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument(f"--user-data-dir={PROFILE_PATH}")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    print("[STEP] Chrome запущен.")
     return driver
 
 def login(driver):
+    print(f"[STEP] Переход на страницу логина: {LOGIN_URL}")
     driver.get(LOGIN_URL)
     wait = WebDriverWait(driver, 20)
+    
     try:
-        wait.until(EC.presence_of_element_located((By.ID, "login-0")))
-        driver.find_element(By.ID, "login-0").send_keys(LOGIN_DATA["login"])
-        driver.find_element(By.ID, "password-0").send_keys(LOGIN_DATA["password"])
-        driver.find_element(By.ID, "save-0").click()
+        # Ищем label с текстом "Логин" и берём соседний input
+        login_label = driver.find_element(By.XPATH, "//label[contains(text(), 'Логин')]")
+        login_input = login_label.find_element(By.XPATH, "./following-sibling::div//input")
+        login_input.send_keys(LOGIN_DATA["login"])
+        print("[STEP] Ввели логин.")
+
+        # Ищем label с текстом "Пароль" и берём соседний input
+        password_label = driver.find_element(By.XPATH, "//label[contains(text(), 'Пароль')]")
+        password_input = password_label.find_element(By.XPATH, "./following-sibling::div//input")
+        password_input.send_keys(LOGIN_DATA["password"])
+        print("[STEP] Ввели пароль.")
+
+        # Кнопка "Увійти"
+        submit_btn = driver.find_element(By.XPATH, "//button[contains(text(),'Увійти')]")
+        submit_btn.click()
+        print("[STEP] Нажата кнопка 'Увійти'")
+
         time.sleep(5)
         save_cookies(driver)
         print("[INFO] Авторизация пройдена и куки сохранены.")
     except TimeoutException:
-        print("[ERROR] Не удалось найти поля для логина — возможно, капча.")
+        print("[ERROR] Не удалось найти поля логина/пароля — возможно капча.")
         raise Exception("Авторизация не удалась")
+    except Exception as e:
+        print(f"[ERROR] Ошибка при авторизации: {e}")
+        raise e
 
 async def send_alert(message: str):
     try:
@@ -102,11 +122,13 @@ async def make_bid(url):
     driver = create_driver()
     wait = WebDriverWait(driver, 20)
     try:
+        print(f"[STEP] Переход на страницу проекта: {url}")
         driver.get(url)
         time.sleep(3)
 
+        # Загружаем куки если есть
         if not load_cookies(driver):
-            print("[INFO] Cookies нет, нужна авторизация.")
+            print("[STEP] Cookies нет, нужна авторизация.")
             login(driver)
             driver.get(url)
             time.sleep(3)
@@ -125,7 +147,7 @@ async def make_bid(url):
         try:
             bid_btn = wait.until(EC.element_to_be_clickable((By.ID, "add-bid")))
             bid_btn.click()
-            print("[INFO] Нажата кнопка 'Сделать ставку'")
+            print("[STEP] Нажата кнопка 'Сделать ставку'")
         except TimeoutException:
             print("[WARNING] Кнопка 'Сделать ставку' не найдена — возможно капча или проект закрыт")
             await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
