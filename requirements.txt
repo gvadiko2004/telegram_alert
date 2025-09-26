@@ -1,0 +1,6 @@
+selenium==4.24.0
+webdriver-manager==4.0.0
+telethon==1.32.0
+python-telegram-bot==13.17
+requests==2.31.0
+twocaptcha-python==0.5.0
