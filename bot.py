@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
 # coding: utf-8
-"""
-Telegram + Selenium bot для Freelancehunt (VPS-ready)
-- Headless Chrome
-- Автологин и сохранение cookies
-- Telegram уведомления без ** в ссылках
-"""
 
 import os
 import time
@@ -56,17 +50,28 @@ COMMENT_TEXT = (
     "Заздалегідь дякую!"
 )
 
-# ---------------- Telegram ----------------
+# ---------------- Init ----------------
 alert_bot = Bot(token=ALERT_BOT_TOKEN)
 tg_client = TelegramClient("session", API_ID, API_HASH)
 
 # ---------------- Helpers ----------------
+def ensure_dns(host="freelancehunt.com"):
+    try:
+        ip = socket.gethostbyname(host)
+        print(f"[NET] DNS ok: {host} -> {ip}")
+        return ip
+    except Exception as e:
+        print(f"[NET WARN] DNS resolve failed: {e}")
+        return None
+
 def make_tmp_profile():
     tmp = os.path.join("/tmp", f"chrome-temp-{int(time.time())}-{random.randint(0,9999)}")
     Path(tmp).mkdir(parents=True, exist_ok=True)
     return tmp
 
 def create_chrome_driver():
+    ip = ensure_dns()
+    tmp_profile = make_tmp_profile()
     opts = Options()
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
@@ -74,18 +79,23 @@ def create_chrome_driver():
     opts.add_argument("--window-size=1366,900")
     if HEADLESS:
         opts.add_argument("--headless=new")
-    tmp_profile = make_tmp_profile()
     opts.add_argument(f"--user-data-dir={tmp_profile}")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
     opts.add_argument("--log-level=3")
+    opts.add_argument("--disable-features=NetworkService")
+    opts.add_argument("--dns-prefetch-disable")
+    if ip:
+        opts.add_argument(f"--host-resolver-rules=MAP freelancehunt.com {ip}")
+
+    svc = Service(ChromeDriverManager().install())
     try:
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
+        driver = webdriver.Chrome(service=svc, options=opts)
         driver.set_page_load_timeout(60)
         print(f"[STEP] Chrome ready. HEADLESS={HEADLESS}. Temp profile: {tmp_profile}")
         return driver
     except WebDriverException as e:
-        print("[ERROR] Chrome driver creation failed:", e)
+        print("[ERROR] Chrome driver error:", e)
         raise
 
 driver = create_chrome_driver()
@@ -95,13 +105,13 @@ def wait_for_body(timeout=20):
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         time.sleep(0.5)
     except TimeoutException:
-        print("[WARN] Page load timeout")
+        print("[WARN] page load timeout")
 
 def save_cookies():
     try:
         with open(COOKIES_FILE, "wb") as f:
             pickle.dump(driver.get_cookies(), f)
-        print("[STEP] Cookies saved")
+        print("[STEP] Cookies saved.")
     except Exception as e:
         print("[ERROR] save_cookies:", e)
 
@@ -116,7 +126,7 @@ def load_cookies():
                 driver.add_cookie(c)
             except Exception:
                 pass
-        print("[STEP] Cookies loaded")
+        print("[STEP] Cookies loaded.")
         return True
     except Exception as e:
         print("[WARN] load_cookies:", e)
@@ -153,23 +163,23 @@ def login_if_needed():
         driver.execute_script("arguments[0].click();", btn)
         time.sleep(3)
         save_cookies()
-        print("[LOGIN] done")
+        print("[LOGIN] login done")
         return True
     except NoSuchElementException:
-        print("[LOGIN] already logged in")
+        print("[LOGIN] already logged in or fields not found")
         return True
     except Exception as e:
         print("[LOGIN ERROR]", e)
         return False
 
-# ---------------- Telegram / Bidding ----------------
+# ---------------- Telegram ----------------
 def extract_links(text):
-    text = text.replace("**", "")  # убираем Telegram Markdown **
     return [ln for ln in re.findall(r"https?://[^\s]+", text) if "freelancehunt.com" in ln]
 
 async def send_alert(msg):
     try:
-        await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=msg, parse_mode="HTML")
+        # parse_mode=None чтобы не вставлялись **
+        await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=msg, parse_mode=None)
         print("[TG ALERT]", msg)
     except Exception as e:
         print("[TG ERROR]", e)
@@ -181,7 +191,6 @@ async def make_bid(url):
         login_if_needed()
         time.sleep(1)
 
-        # Нажатие кнопки "Сделать ставку"
         try:
             bid_btn = WebDriverWait(driver, 12).until(
                 EC.element_to_be_clickable((By.ID, "add-bid"))
@@ -194,7 +203,6 @@ async def make_bid(url):
             await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
             return
 
-        # Заполнение формы
         try:
             amount = driver.find_element(By.ID, "amount-0")
             days = driver.find_element(By.ID, "days_to_deliver-0")
