@@ -24,7 +24,8 @@ HEADLESS = False
 LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
 COOKIES_FILE = "fh_cookies.pkl"
-COMMENT_TEXT = "Доброго дня! Готовий виконати роботу якісно.\nПортфоліо робіт у моєму профілі.\nЗаздалегідь дякую!"
+COMMENT_TEXT = ("Доброго дня! Готовий виконати роботу якісно.\n"
+                "Портфоліо робіт у моєму профілі.\nЗаздалегідь дякую!")
 KEYWORDS = [k.lower() for k in [
     "#html_и_css_верстка","#веб_программирование","#cms",
     "#интернет_магазины_и_электронная_коммерция","#создание_сайта_под_ключ","#дизайн_сайтов"
@@ -209,12 +210,27 @@ async def make_bid(url):
         log(f"Ошибка при ставке: {e}")
 
 # -------- TELEGRAM --------
-def extract_links(txt): return [ln for ln in txt.split() if "freelancehunt.com" in ln]
+def extract_links(event):
+    links = []
+
+    # 1. Ссылки в тексте
+    txt = (event.message.text or "").lower()
+    links += [ln for ln in txt.split() if "freelancehunt.com" in ln]
+
+    # 2. Ссылки в кнопках (inline)
+    if event.message.buttons:
+        for row in event.message.buttons:
+            for btn in row:
+                url = getattr(btn, "url", None)
+                if url and "freelancehunt.com" in url.lower():
+                    links.append(url)
+
+    return links
 
 @tg_client.on(events.NewMessage)
 async def on_msg(event):
+    links = extract_links(event)
     txt = (event.message.text or "").lower()
-    links = extract_links(txt)
     if links and any(k in txt for k in KEYWORDS):
         asyncio.create_task(make_bid(links[0]))
 
