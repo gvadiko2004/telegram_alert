@@ -54,13 +54,14 @@ alert_bot = Bot(token=ALERT_BOT_TOKEN)
 client = TelegramClient("session", api_id, api_hash)
 
 # ----------------- Selenium -----------------
-def create_chrome_driver():
+def create_chrome_driver(headless=False):
     chrome_options = Options()
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
-    # chrome_options.add_argument("--headless=new")  # VPS headless
+    if headless:
+        chrome_options.add_argument("--headless=new")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option("useAutomationExtension", False)
 
@@ -70,8 +71,8 @@ def create_chrome_driver():
     driver.set_page_load_timeout(60)
     return driver
 
-driver = create_chrome_driver()
-print("[STEP] Chrome запущен (headless).")
+driver = create_chrome_driver(headless=False)
+print("[STEP] Chrome запущен.")
 time.sleep(1)
 
 # ----------------- Utils -----------------
@@ -135,6 +136,15 @@ def find_recaptcha_sitekey():
         pass
     return None
 
+def wait_for_recaptcha_iframe(timeout=15):
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='recaptcha']"))
+        )
+        return True
+    except TimeoutException:
+        return False
+
 def submit_2captcha_recaptcha(sitekey, pageurl):
     in_url = "http://2captcha.com/in.php"
     res_url = "http://2captcha.com/res.php"
@@ -157,26 +167,29 @@ def submit_2captcha_recaptcha(sitekey, pageurl):
 
 def inject_recaptcha_token_and_submit(token):
     try:
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        for f in iframes:
+            src = f.get_attribute("src") or ""
+            if "recaptcha" in src:
+                driver.switch_to.frame(f)
+                break
         driver.execute_script("""
-        (function(token){
-            var el = document.getElementById('g-recaptcha-response');
-            if(!el){
-                el = document.createElement('textarea');
-                el.id = 'g-recaptcha-response';
-                el.name = 'g-recaptcha-response';
-                el.style.display = 'none';
-                document.body.appendChild(el);
-            }
-            el.innerHTML = token;
-        })(arguments[0]);
+        var el = document.getElementById('g-recaptcha-response');
+        if(!el){
+            el = document.createElement('textarea');
+            el.id = 'g-recaptcha-response';
+            el.name = 'g-recaptcha-response';
+            el.style.display = 'none';
+            document.body.appendChild(el);
+        }
+        el.innerHTML = arguments[0];
         """, token)
-        try:
-            btn = driver.find_element(By.CSS_SELECTOR, "form button[type='submit'], form input[type='submit']")
-            driver.execute_script("arguments[0].click();", btn)
-        except Exception:
-            driver.execute_script("document.querySelectorAll('form').forEach(f => f.submit());")
+        driver.switch_to.default_content()
+        driver.execute_script("if(window.grecaptcha){for(var k in grecaptcha){try{grecaptcha[k].execute()}catch(e){}}}")
+        driver.execute_script("document.querySelectorAll('form').forEach(f => f.submit());")
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR] inject_recaptcha_token: {e}")
         return False
 
 # ----------------- Login -----------------
@@ -195,7 +208,7 @@ def login_if_needed():
             human_typing(password_input, LOGIN_DATA["password"])
             driver.execute_script("arguments[0].click();", login_btn)
             time.sleep(3)
-            if page_contains_captcha_text():
+            if page_contains_captcha_text() and wait_for_recaptcha_iframe():
                 sitekey = find_recaptcha_sitekey()
                 if sitekey:
                     token = submit_2captcha_recaptcha(sitekey, driver.current_url)
@@ -225,7 +238,7 @@ async def make_bid(url: str):
         driver.get(url)
         wait_for_page_load()
 
-    if page_contains_captcha_text():
+    if page_contains_captcha_text() and wait_for_recaptcha_iframe():
         sitekey = find_recaptcha_sitekey()
         if sitekey:
             token = submit_2captcha_recaptcha(sitekey, driver.current_url)
