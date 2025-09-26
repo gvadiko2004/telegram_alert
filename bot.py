@@ -17,7 +17,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
 
-# ===== Telegram Настройки =====
+# ===== Telegram =====
 api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
@@ -35,30 +35,25 @@ KEYWORDS = [
 ]
 KEYWORDS = [kw.lower() for kw in KEYWORDS]
 
-COMMENT_TEXT = """Доброго дня! Готовий виконати роботу якісно.
-Портфоліо робіт у моєму профілі.
-Заздалегідь дякую!
-"""
-
+COMMENT_TEXT = "Доброго дня! Готовий виконати роботу якісно.\nПортфоліо робіт у моєму профілі.\nЗаздалегідь дякую!"
 COOKIES_FILE = "fh_cookies.pkl"
 LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
 
-# ===== Selenium драйвер (headless для VPS) =====
+# ===== Selenium драйвер =====
 chrome_options = Options()
-chrome_options.add_argument("--headless")  # Headless режим
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--window-size=1920,1080")
-# Унікальний профіль для кожного запуску
-chrome_options.add_argument(f"--user-data-dir=/root/chrome-profile-{int(time.time())}")
+chrome_options.add_argument("--headless=new")  # Headless для VPS
+chrome_options.add_argument("--user-data-dir=/root/chrome-profile")
 
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-
 print("[STEP] Chrome запущен (headless режим).")
+time.sleep(3)
 
-# ===== Функції =====
+# ===== Функции =====
 def extract_links(text: str):
     return [link for link in re.findall(r"https?://[^\s]+", text)
             if link.startswith("https://freelancehunt.com/")]
@@ -125,8 +120,8 @@ async def make_bid(url):
         wait_for_page_load()
 
     try:
-        bid_btn = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.ID, "add-bid"))
+        bid_btn = WebDriverWait(driver, 20).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "button#add-0"))
         )
         bid_btn.click()
         print("[STEP] Нажата кнопка 'Сделать ставку'")
@@ -134,7 +129,6 @@ async def make_bid(url):
         await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
         return
 
-    # Заполняем форму
     try:
         human_typing(driver.find_element(By.ID, "amount-0"), "1111")
         human_typing(driver.find_element(By.ID, "days_to_deliver-0"), "3")
@@ -160,6 +154,7 @@ async def handler(event):
 # ===== Запуск =====
 async def main():
     print("[INFO] Запуск бота уведомлений...")
+    await alert_bot.initialize()
     await client.start()
     print("[INFO] Telegram бот запущен. Ожидаем новые проекты...")
     await client.run_until_disconnected()
