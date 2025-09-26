@@ -4,7 +4,7 @@
 """
 Freelancehunt bidding bot:
 - Telegram listener
-- Selenium + headless Chrome
+- Selenium + Chrome (видимый)
 - Login + Cookies
 - reCAPTCHA solving via 2Captcha
 """
@@ -12,10 +12,8 @@ Freelancehunt bidding bot:
 import os
 import re
 import time
-import random
 import pickle
 import asyncio
-from pathlib import Path
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -42,9 +40,11 @@ LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_DATA = {"login": "YOUR_LOGIN", "password": "YOUR_PASSWORD"}
 
 COOKIES_FILE = "cookies.pkl"
-HEADLESS = True
+HEADLESS = False  # Включаем видимый режим
 
-COMMENT_TEXT = "Доброго дня! Готовий виконати роботу якісно.\nПортфоліо робіт у моєму профілі.\nЗаздалегідь дякую!"
+COMMENT_TEXT = """Доброго дня! Готовий виконати роботу якісно.
+Портфоліо робіт у моєму профілі.
+Заздалегідь дякую!"""
 
 KEYWORDS = [
     "#html_и_css_верстка",
@@ -68,7 +68,7 @@ def make_driver():
     opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1366,900")
     if HEADLESS:
-        opts.add_argument("--headless=new")
+        opts.add_argument("--headless=new")  # закомментировать для видимого браузера
     return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
 
 driver = make_driver()
@@ -83,7 +83,8 @@ def save_cookies():
         pickle.dump(driver.get_cookies(), f)
 
 def load_cookies():
-    if not os.path.exists(COOKIES_FILE): return
+    if not os.path.exists(COOKIES_FILE): 
+        return
     with open(COOKIES_FILE, "rb") as f:
         for c in pickle.load(f):
             try: driver.add_cookie(c)
@@ -93,7 +94,8 @@ def find_sitekey():
     try:
         elem = driver.find_element(By.CSS_SELECTOR, "[data-sitekey]")
         return elem.get_attribute("data-sitekey")
-    except: return None
+    except: 
+        return None
 
 def solve_captcha(sitekey, url):
     try:
