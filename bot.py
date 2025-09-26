@@ -17,7 +17,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
 
-# ===== Настройки Telegram =====
+# ===== Telegram Настройки =====
 api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
@@ -42,23 +42,23 @@ COMMENT_TEXT = """Доброго дня! Готовий виконати роб�
 
 COOKIES_FILE = "fh_cookies.pkl"
 LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
-LOGIN_BUTTON_SELECTOR = "a.inline-block.link-no-underline"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
 
-# ===== Selenium драйвер (один на весь бот) =====
+# ===== Selenium драйвер (headless для VPS) =====
 chrome_options = Options()
+chrome_options.add_argument("--headless")  # Headless режим
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--window-size=1920,1080")
-# Используем отдельный профиль Chrome для сохранения расширений и API ключей
-chrome_options.add_argument("--user-data-dir=/root/chrome-profile")
+# Унікальний профіль для кожного запуску
+chrome_options.add_argument(f"--user-data-dir=/root/chrome-profile-{int(time.time())}")
 
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-print("[STEP] Chrome запущен (видимый режим). Если нужно, установите расширение вручную.")
-time.sleep(5)
 
-# ===== Функции =====
+print("[STEP] Chrome запущен (headless режим).")
+
+# ===== Функції =====
 def extract_links(text: str):
     return [link for link in re.findall(r"https?://[^\s]+", text)
             if link.startswith("https://freelancehunt.com/")]
@@ -111,7 +111,7 @@ def login():
 async def send_alert(message: str):
     try:
         await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=message)
-        print(f"[STEP] Отправлено уведомление в Telegram: {message}")
+        print(f"[STEP] Уведомление отправлено: {message}")
     except Exception as e:
         print(f"[ERROR] Не удалось отправить уведомление: {e}")
 
@@ -160,7 +160,6 @@ async def handler(event):
 # ===== Запуск =====
 async def main():
     print("[INFO] Запуск бота уведомлений...")
-    await alert_bot.initialize()
     await client.start()
     print("[INFO] Telegram бот запущен. Ожидаем новые проекты...")
     await client.run_until_disconnected()
