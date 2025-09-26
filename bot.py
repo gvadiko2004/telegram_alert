@@ -16,7 +16,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
 
-# ===== Настройки Telegram =====
+# ===== Telegram =====
 api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
@@ -40,9 +40,10 @@ COMMENT_TEXT = """Доброго дня! Готовий виконати роб�
 Заздалегідь дякую!
 """
 
-COOKIES_FILE = "fh_cookies.pkl"
+COOKIES_FILE = "/root/chrome_profile/fh_cookies.pkl"
 LOGIN_URL = "https://freelancehunt.com/profile/login"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
+PROFILE_PATH = "/root/chrome_profile"
 
 # ===== Функции =====
 def extract_links(text: str):
@@ -50,6 +51,7 @@ def extract_links(text: str):
             if link.startswith("https://freelancehunt.com/")]
 
 def save_cookies(driver):
+    os.makedirs(PROFILE_PATH, exist_ok=True)
     with open(COOKIES_FILE, "wb") as f:
         pickle.dump(driver.get_cookies(), f)
     print("[INFO] Cookies сохранены.")
@@ -71,8 +73,7 @@ def create_driver():
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
-    # Каждый раз новый временный профиль, чтобы избежать блокировок
-    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_profile_{int(time.time())}")
+    chrome_options.add_argument(f"--user-data-dir={PROFILE_PATH}")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     return driver
 
@@ -93,26 +94,24 @@ def login(driver):
 
 async def send_alert(message: str):
     try:
-        await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=message)
+        alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=message)
     except Exception as e:
         print(f"[ERROR] Не удалось отправить уведомление: {e}")
 
 async def make_bid(url):
     driver = create_driver()
     wait = WebDriverWait(driver, 20)
-
     try:
         driver.get(url)
         time.sleep(3)
 
-        # Загружаем куки если есть
         if not load_cookies(driver):
             print("[INFO] Cookies нет, нужна авторизация.")
             login(driver)
             driver.get(url)
             time.sleep(3)
 
-        # Проверяем авторизацию
+        # Проверка авторизации
         try:
             driver.find_element(By.CSS_SELECTOR, "a[href='/profile']")
             print("[INFO] Уже авторизован.")
@@ -133,14 +132,11 @@ async def make_bid(url):
             driver.quit()
             return
 
-        # Заполняем форму ставки
+        # Заполнение формы
         try:
-            price_field = driver.find_element(By.ID, "amount-0")
-            price_field.send_keys("1111")
-            days_field = driver.find_element(By.ID, "days_to_deliver-0")
-            days_field.send_keys("3")
-            comment_field = driver.find_element(By.ID, "comment-0")
-            comment_field.send_keys(COMMENT_TEXT)
+            driver.find_element(By.ID, "amount-0").send_keys("1111")
+            driver.find_element(By.ID, "days_to_deliver-0").send_keys("3")
+            driver.find_element(By.ID, "comment-0").send_keys(COMMENT_TEXT)
             driver.find_element(By.ID, "add-0").click()
             print("[SUCCESS] Ставка отправлена")
             await send_alert(f"✅ Ставка успешно отправлена!\nСсылка: {url}")
@@ -156,7 +152,7 @@ async def make_bid(url):
         driver.quit()
         print("[INFO] Браузер закрыт.")
 
-# ===== Телеграм =====
+# ===== Telegram =====
 client = TelegramClient("session", api_id, api_hash)
 
 @client.on(events.NewMessage)
@@ -171,8 +167,6 @@ async def handler(event):
 # ===== Запуск =====
 async def main():
     print("[INFO] Запуск бота уведомлений...")
-    await alert_bot.initialize()
-    print("[INFO] Бот уведомлений запущен.")
     await client.start()
     print("[INFO] Telegram бот запущен. Ожидаем новые проекты...")
     await client.run_until_disconnected()
