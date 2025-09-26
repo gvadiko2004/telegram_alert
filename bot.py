@@ -51,12 +51,12 @@ chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--window-size=1920,1080")
-# Можно добавить здесь путь к заранее установленному профилю Chrome, чтобы кеш и расширения сохранялись
-# chrome_options.add_argument("--user-data-dir=/root/chrome-profile")
+# Используем отдельный профиль Chrome для сохранения расширений и API ключей
+chrome_options.add_argument("--user-data-dir=/root/chrome-profile")
 
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-print("[STEP] Chrome запущен (видимый режим). Ожидаем установку расширения вручную...")
-time.sleep(10)  # Даём время установить расширение вручную
+print("[STEP] Chrome запущен (видимый режим). Если нужно, установите расширение вручную.")
+time.sleep(5)
 
 # ===== Функции =====
 def extract_links(text: str):
@@ -91,25 +91,22 @@ def human_typing(element, text, delay_range=(0.05, 0.15)):
         time.sleep(random.uniform(*delay_range))
 
 def login():
+    driver.get(LOGIN_URL)
+    wait_for_page_load()
     try:
-        driver.get(LOGIN_URL)
+        login_input = driver.find_element(By.ID, "login-0")
+        password_input = driver.find_element(By.ID, "password-0")
+        login_submit = driver.find_element(By.ID, "save-0")
+        print("[STEP] Поля логин/пароль найдены.")
+        human_typing(login_input, LOGIN_DATA["login"])
+        human_typing(password_input, LOGIN_DATA["password"])
+        driver.execute_script("arguments[0].click();", login_submit)
+        print("[STEP] Нажата кнопка 'Увійти'")
+        time.sleep(5)
         wait_for_page_load()
-        try:
-            login_input = driver.find_element(By.ID, "login-0")
-            password_input = driver.find_element(By.ID, "password-0")
-            login_submit = driver.find_element(By.ID, "save-0")
-            print("[STEP] Поля логин/пароль найдены.")
-            human_typing(login_input, LOGIN_DATA["login"])
-            human_typing(password_input, LOGIN_DATA["password"])
-            driver.execute_script("arguments[0].click();", login_submit)
-            print("[STEP] Нажата кнопка 'Увійти'")
-            time.sleep(5)
-            wait_for_page_load()
-            save_cookies()
-        except NoSuchElementException:
-            print("[INFO] Поля логина не найдены, возможно уже залогинены.")
-    except Exception as e:
-        print(f"[ERROR] Ошибка при логине: {e}")
+        save_cookies()
+    except NoSuchElementException:
+        print("[INFO] Поля логина не найдены, возможно уже залогинены.")
 
 async def send_alert(message: str):
     try:
@@ -119,37 +116,34 @@ async def send_alert(message: str):
         print(f"[ERROR] Не удалось отправить уведомление: {e}")
 
 async def make_bid(url):
-    try:
+    driver.get(url)
+    wait_for_page_load()
+
+    if not load_cookies():
+        login()
         driver.get(url)
         wait_for_page_load()
 
-        if not load_cookies():
-            login()
-            driver.get(url)
-            wait_for_page_load()
+    try:
+        bid_btn = WebDriverWait(driver, 15).until(
+            EC.element_to_be_clickable((By.ID, "add-bid"))
+        )
+        bid_btn.click()
+        print("[STEP] Нажата кнопка 'Сделать ставку'")
+    except TimeoutException:
+        await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
+        return
 
-        try:
-            bid_btn = WebDriverWait(driver, 15).until(
-                EC.element_to_be_clickable((By.ID, "add-bid"))
-            )
-            bid_btn.click()
-            print("[STEP] Нажата кнопка 'Сделать ставку'")
-        except TimeoutException:
-            await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
-            return
-
-        # Заполняем форму
-        try:
-            human_typing(driver.find_element(By.ID, "amount-0"), "1111")
-            human_typing(driver.find_element(By.ID, "days_to_deliver-0"), "3")
-            human_typing(driver.find_element(By.ID, "comment-0"), COMMENT_TEXT, delay_range=(0.02,0.08))
-            driver.find_element(By.ID, "add-0").click()
-            print("[STEP] Форма ставки заполнена и отправлена.")
-            await send_alert(f"✅ Ставка успешно отправлена!\nСсылка: {url}")
-        except Exception as e:
-            await send_alert(f"❌ Ошибка при заполнении формы: {e}\nСсылка: {url}")
+    # Заполняем форму
+    try:
+        human_typing(driver.find_element(By.ID, "amount-0"), "1111")
+        human_typing(driver.find_element(By.ID, "days_to_deliver-0"), "3")
+        human_typing(driver.find_element(By.ID, "comment-0"), COMMENT_TEXT, delay_range=(0.02,0.08))
+        driver.find_element(By.ID, "add-0").click()
+        print("[STEP] Форма ставки заполнена и отправлена.")
+        await send_alert(f"✅ Ставка успешно отправлена!\nСсылка: {url}")
     except Exception as e:
-        await send_alert(f"❌ Ошибка при обработке проекта: {e}\nСсылка: {url}")
+        await send_alert(f"❌ Ошибка при заполнении формы: {e}\nСсылка: {url}")
 
 # ===== Telegram =====
 client = TelegramClient("session", api_id, api_hash)
