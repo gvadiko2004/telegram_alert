@@ -44,9 +44,7 @@ def ensure_dns(host="freelancehunt.com"):
         ip = socket.gethostbyname(host)
         log(f"DNS OK: {host} -> {ip}")
         return True
-    except:
-        log(f"DNS НЕУДАЛОСЬ: {host}")
-        return False
+    except: log(f"DNS НЕУДАЛОСЬ: {host}"); return False
 
 def tmp_profile():
     tmp = f"/tmp/chrome-{int(time.time())}-{random.randint(0,9999)}"
@@ -70,16 +68,11 @@ def driver_create():
 driver = driver_create()
 
 def wait_body(timeout=20):
-    try:
-        WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME,"body")))
-        time.sleep(0.3)
-    except TimeoutException:
-        log("Таймаут загрузки страницы")
+    try: WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME,"body"))); time.sleep(0.3)
+    except: pass
 
 def human_type(el, txt, delay=(0.04,0.12)):
-    for ch in txt:
-        el.send_keys(ch)
-        time.sleep(random.uniform(*delay))
+    for ch in txt: el.send_keys(ch); time.sleep(random.uniform(*delay))
 
 def human_scroll():
     try:
@@ -91,8 +84,7 @@ def human_scroll():
 
 def save_cookies():
     try:
-        with open(COOKIES_FILE,"wb") as f:
-            pickle.dump(driver.get_cookies(),f)
+        with open(COOKIES_FILE,"wb") as f: pickle.dump(driver.get_cookies(),f)
     except: pass
 
 def load_cookies():
@@ -106,9 +98,7 @@ def load_cookies():
     return True
 
 def logged_in():
-    try:
-        driver.find_element(By.CSS_SELECTOR,"a[href='/profile']")
-        return True
+    try: driver.find_element(By.CSS_SELECTOR,"a[href='/profile']"); return True
     except: return False
 
 def login():
@@ -117,16 +107,16 @@ def login():
     load_cookies()
     if logged_in(): return True
     try:
-        login_field = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "login")))
-        pass_field = driver.find_element(By.NAME, "password")
+        login_field = WebDriverWait(driver,10).until(EC.presence_of_element_located((By.NAME,"login")))
+        pass_field = driver.find_element(By.NAME,"password")
         login_field.send_keys(LOGIN_DATA["login"])
         pass_field.send_keys(LOGIN_DATA["password"])
-        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-        WebDriverWait(driver, 5).until(lambda d: logged_in())
+        driver.find_element(By.CSS_SELECTOR,"button[type='submit']").click()
+        WebDriverWait(driver,5).until(lambda d: logged_in())
         save_cookies()
         log("Авторизация успешна")
         return True
-    except: return False
+    except: log("Не удалось авторизоваться"); return False
 
 # -------- CAPTCHA --------
 def init_captcha():
@@ -134,25 +124,21 @@ def init_captcha():
     if CAPTCHA_API_KEY:
         solver = TwoCaptcha(CAPTCHA_API_KEY)
         log("Анти-капча инициализирована и готова к работе")
-    else:
-        solver = None
-        log("Ключ API не задан, капча отключена")
+    else: solver = None; log("Ключ API не задан, капча отключена")
 
 def solve_captcha():
     if not solver: return False
     try:
-        frames = driver.find_elements(By.TAG_NAME, "iframe")
-        for f in frames:
+        for f in driver.find_elements(By.TAG_NAME,"iframe"):
             src = f.get_attribute("src") or ""
             if "recaptcha" in src:
-                sitekey = re.search(r"sitekey=([a-zA-Z0-9_-]+)", src)
+                sitekey = re.search(r"sitekey=([a-zA-Z0-9_-]+)",src)
                 if not sitekey: return False
                 sitekey = sitekey.group(1)
-                url = driver.current_url
-                result = solver.recaptcha(sitekey=sitekey, url=url)
+                result = solver.recaptcha(sitekey=sitekey, url=driver.current_url)
                 code = result.get("code")
                 driver.execute_script(f'document.getElementById("g-recaptcha-response").innerHTML="{code}";')
-                driver.execute_script('___grecaptcha_cfg.clients[0].R.R.callback(arguments[0]);', code)
+                driver.execute_script('___grecaptcha_cfg.clients[0].R.R.callback(arguments[0]);',code)
                 log("Капча решена")
                 return True
         log("Капча на странице не найдена")
@@ -160,9 +146,7 @@ def solve_captcha():
     except: return False
 
 async def send_alert(msg):
-    try:
-        await alert_bot.send_message(chat_id=ALERT_CHAT_ID,text=msg)
-        log(f"TG ALERT: {msg}")
+    try: await alert_bot.send_message(chat_id=ALERT_CHAT_ID,text=msg); log(f"TG ALERT: {msg}")
     except: pass
 
 # -------- BID --------
@@ -185,32 +169,24 @@ async def make_bid(url):
         except: pass
 
         # --- Клик "Сделать ставку" ---
-        try:
-            WebDriverWait(driver,5).until(EC.element_to_be_clickable((By.ID,"add-bid"))).click()
-            time.sleep(0.5)
-            human_scroll()
+        try: WebDriverWait(driver,5).until(EC.element_to_be_clickable((By.ID,"add-bid"))).click(); time.sleep(0.5); human_scroll()
         except: pass
 
         # --- Определяем сумму ---
-        try:
-            span = driver.find_element(By.CSS_SELECTOR,"span.text-green.bold.pull-right.price")
-            amount = re.sub(r"[^\d\.]", "", span.text)
-        except:
-            amount = "1111"
+        try: span = driver.find_element(By.CSS_SELECTOR,"span.text-green.bold.pull-right.price"); amount = re.sub(r"[^\d\.]","",span.text)
+        except: amount = "1111"
 
         # --- Заполняем форму ---
-        try: human_type(driver.find_element(By.ID,"amount-0"), amount)
+        try: human_type(driver.find_element(By.ID,"amount-0"),amount)
         except: pass
-        try: human_type(driver.find_element(By.ID,"days_to_deliver-0"), "3")
+        try: human_type(driver.find_element(By.ID,"days_to_deliver-0"),"3")
         except: pass
-        try: human_type(driver.find_element(By.ID,"comment-0"), COMMENT_TEXT, (0.02,0.07))
+        try: human_type(driver.find_element(By.ID,"comment-0"),COMMENT_TEXT,(0.02,0.07))
         except: pass
         time.sleep(0.4)
 
         # --- Финальный клик "Добавить" ---
-        try:
-            btn = driver.find_element(By.ID,"btn-submit-0")
-            btn.click()
+        try: driver.find_element(By.ID,"btn-submit-0").click()
         except: pass
 
         await send_alert(f"✅ Ставка отправлена: {url}")
@@ -222,16 +198,13 @@ def extract_links(msg):
     links = []
     # текст
     for word in (msg.text or "").split():
-        if "freelancehunt.com" in word:
-            links.append(word)
+        if "freelancehunt.com" in word: links.append(word)
     # кнопки inline
     try:
-        for b in getattr(msg, "buttons", []) or []:
-            if hasattr(b, "__iter__"):
-                for btn in b:
-                    url = getattr(btn, "url", None)
-                    if url and "freelancehunt.com" in url:
-                        links.append(url)
+        for row in getattr(msg,"buttons",[]) or []:
+            for btn in row:
+                url = getattr(btn,"url",None)
+                if url and "freelancehunt.com" in url: links.append(url)
     except: pass
     return list(set(links))
 
@@ -257,8 +230,5 @@ async def main():
     await tg_client.run_until_disconnected()
 
 if __name__=="__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        log("Завершение работы")
-        driver.quit()
+    try: asyncio.run(main())
+    except KeyboardInterrupt: log("Завершение работы"); driver.quit()
