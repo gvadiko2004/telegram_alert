@@ -45,17 +45,30 @@ LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_BUTTON_SELECTOR = "a.inline-block.link-no-underline"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
 
+# ===== Selenium драйвер (один на весь бот) =====
+chrome_options = Options()
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
+chrome_options.add_argument("--disable-gpu")
+chrome_options.add_argument("--window-size=1920,1080")
+# Можно добавить здесь путь к заранее установленному профилю Chrome, чтобы кеш и расширения сохранялись
+# chrome_options.add_argument("--user-data-dir=/root/chrome-profile")
+
+driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+print("[STEP] Chrome запущен (видимый режим). Ожидаем установку расширения вручную...")
+time.sleep(10)  # Даём время установить расширение вручную
+
 # ===== Функции =====
 def extract_links(text: str):
     return [link for link in re.findall(r"https?://[^\s]+", text)
             if link.startswith("https://freelancehunt.com/")]
 
-def save_cookies(driver):
+def save_cookies():
     with open(COOKIES_FILE, "wb") as f:
         pickle.dump(driver.get_cookies(), f)
     print("[STEP] Cookies сохранены.")
 
-def load_cookies(driver):
+def load_cookies():
     if os.path.exists(COOKIES_FILE):
         with open(COOKIES_FILE, "rb") as f:
             cookies = pickle.load(f)
@@ -65,79 +78,38 @@ def load_cookies(driver):
         return True
     return False
 
-def create_driver():
-    chrome_options = Options()
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920,1080")
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-    print("[STEP] Chrome запущен (видимый режим).")
-    return driver
-
-def wait_for_page_load(driver, timeout=15):
+def wait_for_page_load(timeout=15):
     try:
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        print("[STEP] Страница полностью загружена.")
         time.sleep(2)
     except TimeoutException:
         print("[WARNING] Таймаут ожидания загрузки страницы.")
 
 def human_typing(element, text, delay_range=(0.05, 0.15)):
-    """Ввод текста по символам с задержкой, как человек."""
     for char in text:
         element.send_keys(char)
         time.sleep(random.uniform(*delay_range))
 
-def check_captcha(driver):
+def login():
     try:
-        body_text = driver.find_element(By.TAG_NAME, "body").text
-        if "капча" in body_text.lower() or "captcha" in body_text.lower():
-            print("[WARNING] На странице обнаружена капча!")
-            return True
-    except Exception:
-        pass
-    return False
-
-def login(driver):
-    # Если есть кнопка "Вхід" — нажать через JS
-    try:
-        login_btn = driver.find_element(By.CSS_SELECTOR, LOGIN_BUTTON_SELECTOR)
-        driver.execute_script("arguments[0].click();", login_btn)
-        print("[STEP] Нажата кнопка 'Вхід', переходим на страницу логина через JS.")
-        time.sleep(3)
-    except NoSuchElementException:
-        print("[INFO] Кнопка 'Вхід' не найдена, возможно уже на странице логина.")
-
-    driver.get(LOGIN_URL)
-    print(f"[STEP] Переход на страницу логина: {LOGIN_URL}")
-    wait_for_page_load(driver)
-
-    try:
-        login_input = driver.find_element(By.ID, "login-0")
-        password_input = driver.find_element(By.ID, "password-0")
-        login_submit = driver.find_element(By.ID, "save-0")
-        print("[STEP] Поля Логин и Пароль найдены.")
-
-        human_typing(login_input, LOGIN_DATA["login"])
-        print(f"[STEP] Введен логин: {LOGIN_DATA['login']}")
-        time.sleep(0.5)
-        human_typing(password_input, LOGIN_DATA["password"])
-        print(f"[STEP] Введен пароль.")
-
-        driver.execute_script("arguments[0].click();", login_submit)
-        print("[STEP] Нажата кнопка 'Увійти' через JS.")
-        time.sleep(5)
-        wait_for_page_load(driver)
-
-        if check_captcha(driver):
-            raise Exception("Капча обнаружена после попытки логина.")
-
-        save_cookies(driver)
-        print("[STEP] Авторизация пройдена и куки сохранены.")
-
-    except NoSuchElementException:
-        raise Exception("Поля логина/пароля или кнопка не найдены — возможно капча.")
+        driver.get(LOGIN_URL)
+        wait_for_page_load()
+        try:
+            login_input = driver.find_element(By.ID, "login-0")
+            password_input = driver.find_element(By.ID, "password-0")
+            login_submit = driver.find_element(By.ID, "save-0")
+            print("[STEP] Поля логин/пароль найдены.")
+            human_typing(login_input, LOGIN_DATA["login"])
+            human_typing(password_input, LOGIN_DATA["password"])
+            driver.execute_script("arguments[0].click();", login_submit)
+            print("[STEP] Нажата кнопка 'Увійти'")
+            time.sleep(5)
+            wait_for_page_load()
+            save_cookies()
+        except NoSuchElementException:
+            print("[INFO] Поля логина не найдены, возможно уже залогинены.")
+    except Exception as e:
+        print(f"[ERROR] Ошибка при логине: {e}")
 
 async def send_alert(message: str):
     try:
@@ -147,34 +119,23 @@ async def send_alert(message: str):
         print(f"[ERROR] Не удалось отправить уведомление: {e}")
 
 async def make_bid(url):
-    driver = create_driver()
     try:
         driver.get(url)
-        print(f"[STEP] Перешли на страницу проекта: {url}")
-        wait_for_page_load(driver)
+        wait_for_page_load()
 
-        if not load_cookies(driver):
-            print("[STEP] Cookies нет, нужна авторизация.")
-            login(driver)
+        if not load_cookies():
+            login()
             driver.get(url)
-            wait_for_page_load(driver)
-            print(f"[STEP] Вернулись на страницу проекта после логина: {url}")
-
-        if check_captcha(driver):
-            await send_alert(f"⚠️ Обнаружена капча на странице: {url}")
-            driver.quit()
-            return
+            wait_for_page_load()
 
         try:
             bid_btn = WebDriverWait(driver, 15).until(
                 EC.element_to_be_clickable((By.ID, "add-bid"))
             )
-            time.sleep(1)
             bid_btn.click()
             print("[STEP] Нажата кнопка 'Сделать ставку'")
         except TimeoutException:
             await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
-            driver.quit()
             return
 
         # Заполняем форму
@@ -182,18 +143,13 @@ async def make_bid(url):
             human_typing(driver.find_element(By.ID, "amount-0"), "1111")
             human_typing(driver.find_element(By.ID, "days_to_deliver-0"), "3")
             human_typing(driver.find_element(By.ID, "comment-0"), COMMENT_TEXT, delay_range=(0.02,0.08))
-            time.sleep(1)
             driver.find_element(By.ID, "add-0").click()
             print("[STEP] Форма ставки заполнена и отправлена.")
             await send_alert(f"✅ Ставка успешно отправлена!\nСсылка: {url}")
         except Exception as e:
-            await send_alert(f"❌ Ошибка при заполнении формы ставки: {e}\nСсылка: {url}")
-
+            await send_alert(f"❌ Ошибка при заполнении формы: {e}\nСсылка: {url}")
     except Exception as e:
         await send_alert(f"❌ Ошибка при обработке проекта: {e}\nСсылка: {url}")
-    finally:
-        driver.quit()
-        print("[STEP] Браузер закрыт.")
 
 # ===== Telegram =====
 client = TelegramClient("session", api_id, api_hash)
@@ -211,10 +167,10 @@ async def handler(event):
 async def main():
     print("[INFO] Запуск бота уведомлений...")
     await alert_bot.initialize()
-    print("[INFO] Бот уведомлений запущен.")
     await client.start()
     print("[INFO] Telegram бот запущен. Ожидаем новые проекты...")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
+    login()  # Вход в аккаунт при старте
     asyncio.run(main())
