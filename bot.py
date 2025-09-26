@@ -2,10 +2,9 @@
 # coding: utf-8
 """
 Telegram + Selenium bot для Freelancehunt (VPS-ready)
-- Headless Chrome с фиксированным DNS
+- Headless Chrome
 - Автологин и сохранение cookies
-- 2Captcha для reCAPTCHA v2
-- Telegram уведомления
+- Telegram уведомления без ** в ссылках
 """
 
 import os
@@ -27,7 +26,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
 
-from twocaptcha import TwoCaptcha
 from telethon import TelegramClient, events
 from telegram import Bot
 
@@ -37,9 +35,7 @@ API_HASH = "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
 ALERT_CHAT_ID = 1168962519
 
-CAPTCHA_API_KEY = os.getenv("TWOCAPTCHA_API_KEY", "898059857fb8c709ca5c9613d44ffae4")
 HEADLESS = True
-
 LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
 COOKIES_FILE = "fh_cookies.pkl"
@@ -52,6 +48,7 @@ KEYWORDS = [
     "#создание_сайта_под_ключ",
     "#дизайн_сайтов"
 ]
+KEYWORDS = [k.lower() for k in KEYWORDS]
 
 COMMENT_TEXT = (
     "Доброго дня! Готовий виконати роботу якісно.\n"
@@ -59,39 +56,17 @@ COMMENT_TEXT = (
     "Заздалегідь дякую!"
 )
 
-# ---------------- Init Telegram / 2Captcha ----------------
+# ---------------- Telegram ----------------
 alert_bot = Bot(token=ALERT_BOT_TOKEN)
 tg_client = TelegramClient("session", API_ID, API_HASH)
 
-solver = None
-if CAPTCHA_API_KEY:
-    try:
-        solver = TwoCaptcha(CAPTCHA_API_KEY)
-        print("[STEP] 2Captcha client initialized.")
-    except Exception as e:
-        print("[WARN] 2Captcha init error:", e)
-else:
-    print("[WARN] No 2Captcha API key provided.")
-
 # ---------------- Helpers ----------------
-def ensure_dns(name="freelancehunt.com", timeout=5):
-    try:
-        socket.setdefaulttimeout(timeout)
-        ip = socket.gethostbyname(name)
-        print(f"[NET] DNS ok: {name} -> {ip}")
-        return ip
-    except Exception as e:
-        print(f"[NET WARN] DNS resolve failed for {name}: {e}")
-        return None
-
 def make_tmp_profile():
     tmp = os.path.join("/tmp", f"chrome-temp-{int(time.time())}-{random.randint(0,9999)}")
     Path(tmp).mkdir(parents=True, exist_ok=True)
     return tmp
 
 def create_chrome_driver():
-    ip = ensure_dns()
-    tmp_profile = make_tmp_profile()
     opts = Options()
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
@@ -99,23 +74,18 @@ def create_chrome_driver():
     opts.add_argument("--window-size=1366,900")
     if HEADLESS:
         opts.add_argument("--headless=new")
+    tmp_profile = make_tmp_profile()
     opts.add_argument(f"--user-data-dir={tmp_profile}")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
     opts.add_argument("--log-level=3")
-    opts.add_argument("--disable-features=NetworkService")
-    opts.add_argument("--dns-prefetch-disable")
-    if ip:
-        opts.add_argument(f"--host-resolver-rules=MAP freelancehunt.com {ip}")
-
-    svc = Service(ChromeDriverManager().install())
     try:
-        driver = webdriver.Chrome(service=svc, options=opts)
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
         driver.set_page_load_timeout(60)
-        print(f"[STEP] Chrome ready. HEADLESS={HEADLESS}. Profile: {tmp_profile}")
+        print(f"[STEP] Chrome ready. HEADLESS={HEADLESS}. Temp profile: {tmp_profile}")
         return driver
     except WebDriverException as e:
-        print("[ERROR] creating Chrome WebDriver:", e)
+        print("[ERROR] Chrome driver creation failed:", e)
         raise
 
 driver = create_chrome_driver()
@@ -125,13 +95,13 @@ def wait_for_body(timeout=20):
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         time.sleep(0.5)
     except TimeoutException:
-        print("[WARN] page load timeout")
+        print("[WARN] Page load timeout")
 
 def save_cookies():
     try:
         with open(COOKIES_FILE, "wb") as f:
             pickle.dump(driver.get_cookies(), f)
-        print("[STEP] Cookies saved.")
+        print("[STEP] Cookies saved")
     except Exception as e:
         print("[ERROR] save_cookies:", e)
 
@@ -146,7 +116,7 @@ def load_cookies():
                 driver.add_cookie(c)
             except Exception:
                 pass
-        print("[STEP] Cookies loaded.")
+        print("[STEP] Cookies loaded")
         return True
     except Exception as e:
         print("[WARN] load_cookies:", e)
@@ -183,10 +153,10 @@ def login_if_needed():
         driver.execute_script("arguments[0].click();", btn)
         time.sleep(3)
         save_cookies()
-        print("[LOGIN] login done")
+        print("[LOGIN] done")
         return True
     except NoSuchElementException:
-        print("[LOGIN] fields not found, maybe already logged in")
+        print("[LOGIN] already logged in")
         return True
     except Exception as e:
         print("[LOGIN ERROR]", e)
@@ -194,12 +164,12 @@ def login_if_needed():
 
 # ---------------- Telegram / Bidding ----------------
 def extract_links(text):
-    # Сохраняем ссылки в оригинальном виде, без ** и lower()
+    text = text.replace("**", "")  # убираем Telegram Markdown **
     return [ln for ln in re.findall(r"https?://[^\s]+", text) if "freelancehunt.com" in ln]
 
 async def send_alert(msg):
     try:
-        await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=msg, parse_mode=None)
+        await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=msg, parse_mode="HTML")
         print("[TG ALERT]", msg)
     except Exception as e:
         print("[TG ERROR]", e)
@@ -211,6 +181,7 @@ async def make_bid(url):
         login_if_needed()
         time.sleep(1)
 
+        # Нажатие кнопки "Сделать ставку"
         try:
             bid_btn = WebDriverWait(driver, 12).until(
                 EC.element_to_be_clickable((By.ID, "add-bid"))
@@ -223,6 +194,7 @@ async def make_bid(url):
             await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
             return
 
+        # Заполнение формы
         try:
             amount = driver.find_element(By.ID, "amount-0")
             days = driver.find_element(By.ID, "days_to_deliver-0")
@@ -247,7 +219,7 @@ async def on_msg(event):
     text = event.message.text or ""
     print("[TG MESSAGE]", text)
     links = extract_links(text)
-    if links and any(k.lower() in text.lower() for k in KEYWORDS):
+    if links and any(k in text.lower() for k in KEYWORDS):
         await make_bid(links[0])
 
 # ---------------- Main ----------------
